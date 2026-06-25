@@ -1,0 +1,50 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "graphon.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "graphon.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.ingress.certManagerIssuer }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.certManagerIssuer | quote }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.hosts.ui | quote }}
+      secretName: {{ .Values.ingress.tls.uiSecretName | quote }}
+    - hosts:
+        - {{ .Values.ingress.hosts.api | quote }}
+      secretName: {{ .Values.ingress.tls.apiSecretName | quote }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.hosts.ui | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "graphon.ui.fullname" . }}
+                port:
+                  name: http
+    - host: {{ .Values.ingress.hosts.api | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "graphon.backend.fullname" . }}
+                port:
+                  name: http
+{{- end }}

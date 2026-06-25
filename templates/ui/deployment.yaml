@@ -1,0 +1,60 @@
+{{- if .Values.ui.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "graphon.ui.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "graphon.ui.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.ui.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "graphon.ui.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "graphon.ui.selectorLabels" . | nindent 8 }}
+      {{- with .Values.ui.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: ui
+          image: {{ include "graphon.ui.image" . }}
+          imagePullPolicy: {{ .Values.ui.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            # The UI uses this env var at build time (Vite VITE_API_URL).
+            # At runtime we inject it via an nginx sub_filter or a ConfigMap-mounted
+            # env.js file. For simplicity the chart injects it into the container env
+            # so custom images can read it.
+            - name: VITE_API_URL
+              value: {{ if .Values.ui.apiUrl }}{{ .Values.ui.apiUrl | quote }}{{ else }}{{ printf "http://%s:%d" (include "graphon.backend.fullname" .) (int .Values.backend.service.port) | quote }}{{ end }}
+          {{- with .Values.ui.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.ui.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+      {{- with .Values.ui.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ui.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

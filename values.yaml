@@ -1,0 +1,296 @@
+# ────────────────────────────────────────────────────────────────────────────
+# Graphon Helm Chart — values.yaml
+# Full reference: https://github.com/retr0-kernel/graphon/blob/main/graphon-helm/docs/kubernetes-installation.md
+# ────────────────────────────────────────────────────────────────────────────
+
+# -- Global image settings shared across all components.
+global:
+  imageRegistry: ""       # Override to use a private registry: "your-registry.io"
+  imagePullSecrets: []    # e.g. ["regcred"]
+  storageClass: ""        # Leave empty to use cluster default
+
+# ────────────────────────────────────────────────────────────────────────────
+# Backend
+# ────────────────────────────────────────────────────────────────────────────
+backend:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    registry: ghcr.io
+    repository: retr0-kernel/graphon-backend
+    tag: "v0.2.0"
+    pullPolicy: IfNotPresent
+
+  # AUTH_DISABLED=true  → self-hosted mode: X-Tenant-ID header accepted (no API key needed)
+  # AUTH_DISABLED=false → API key required (Graphon Cloud / production mode)
+  authDisabled: true
+
+  # Number of days before an OBSERVED dependency edge is promoted to BASELINE
+  baselineDays: 7
+
+  # CORS allowed origins — comma-separated or "*"
+  corsOrigins: "*"
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Probes
+  startupProbe:
+    httpGet:
+      path: /ready
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    failureThreshold: 12   # 60s total startup budget
+
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    failureThreshold: 3
+
+  livenessProbe:
+    httpGet:
+      path: /api/v1/health
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    failureThreshold: 3
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+  podSecurityContext: {}
+
+  # Extra environment variables to inject into the backend pod.
+  # Useful for LOG_LEVEL, CORS_ORIGINS, etc.
+  extraEnv: []
+  # - name: LOG_LEVEL
+  #   value: debug
+
+# ────────────────────────────────────────────────────────────────────────────
+# UI
+# ────────────────────────────────────────────────────────────────────────────
+ui:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    registry: ghcr.io
+    repository: retr0-kernel/graphon-ui
+    tag: "v0.2.0"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 80
+
+  # The UI needs to know where to reach the backend.
+  # Set this to the external URL if ingress is enabled, e.g. https://api.graphon.example.com
+  # Leave empty to use the in-cluster backend service (http://graphon-backend:8080).
+  apiUrl: ""
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 80
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 80
+    initialDelaySeconds: 15
+    periodSeconds: 30
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+
+# ────────────────────────────────────────────────────────────────────────────
+# eBPF Agent (DaemonSet)
+# Requires Linux kernel ≥ 5.4 and CAP_SYS_ADMIN / privileged.
+# Does NOT work on managed Fargate nodes or GKE Autopilot.
+# ────────────────────────────────────────────────────────────────────────────
+agent:
+  enabled: true
+
+  image:
+    registry: ghcr.io
+    repository: retr0-kernel/graphon-agent
+    tag: "v0.2.0"
+    pullPolicy: IfNotPresent
+
+  # How often to flush captured events to the backend
+  flushInterval: "5s"
+
+  # Your tenant identifier — must be a DNS-safe string
+  tenantId: "default"
+
+  # privileged: true is required for eBPF kprobe attachment
+  privileged: true
+
+  # Run on all nodes including masters/control-plane
+  tolerateAllTaints: true
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  nodeSelector: {}
+  # Additional tolerations beyond the all-taints toleration
+  tolerations: []
+  podAnnotations: {}
+
+# ────────────────────────────────────────────────────────────────────────────
+# Ingress
+# ────────────────────────────────────────────────────────────────────────────
+ingress:
+  enabled: false
+  className: "nginx"
+
+  # cert-manager ClusterIssuer annotation.
+  # Set to your issuer name or remove to manage TLS manually.
+  certManagerIssuer: "letsencrypt-prod"
+
+  hosts:
+    ui: "graphon.example.com"
+    api: "api.graphon.example.com"
+
+  tls:
+    enabled: false
+    # Secrets are auto-created by cert-manager when certManagerIssuer is set.
+    # Set manually if not using cert-manager:
+    uiSecretName: "graphon-ui-tls"
+    apiSecretName: "graphon-api-tls"
+
+  annotations: {}
+  # nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+  # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+# ────────────────────────────────────────────────────────────────────────────
+# PostgreSQL — embedded (bitnami/postgresql)
+# Set postgresql.enabled=false and provide externalPostgresql to use
+# your own database.
+# ────────────────────────────────────────────────────────────────────────────
+postgresql:
+  enabled: true
+
+  auth:
+    username: graphon
+    database: graphon
+    # Password is auto-generated if not set. To specify:
+    # password: "your-password"
+    # Or use an existing secret:
+    # existingSecret: "my-pg-secret"
+    # secretKeys:
+    #   adminPasswordKey: postgres-password
+    #   userPasswordKey: password
+
+  primary:
+    persistence:
+      enabled: true
+      size: 10Gi
+      # storageClass: ""  # leave empty for cluster default
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+# External PostgreSQL — used when postgresql.enabled=false
+externalPostgresql:
+  host: ""
+  port: 5432
+  database: graphon
+  username: graphon
+  # Provide password via existingSecret (recommended) or plaintext (dev only):
+  password: ""
+  existingSecret: ""         # secret name
+  existingSecretKey: "password"  # key inside the secret
+  sslMode: "require"         # disable | require | verify-full
+
+# ────────────────────────────────────────────────────────────────────────────
+# Neo4j — embedded (neo4j/neo4j)
+# Set neo4j.enabled=false and provide externalNeo4j to use your own instance.
+# ────────────────────────────────────────────────────────────────────────────
+neo4j:
+  enabled: true
+
+  neo4j:
+    name: graphon
+    edition: community
+    # Password auto-generated if not set. To specify:
+    # password: "your-password"
+
+  volumes:
+    data:
+      mode: defaultStorageClass
+      defaultStorageClass:
+        requests:
+          storage: 10Gi
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+  services:
+    neo4j:
+      enabled: false   # no external LB — we use cluster-internal bolt only
+
+# External Neo4j — used when neo4j.enabled=false
+externalNeo4j:
+  boltUrl: ""     # e.g. bolt://neo4j.example.com:7687
+  username: neo4j
+  # Provide password via existingSecret (recommended) or plaintext (dev only):
+  password: ""
+  existingSecret: ""
+  existingSecretKey: "password"
+
+# ────────────────────────────────────────────────────────────────────────────
+# Service Account
+# ────────────────────────────────────────────────────────────────────────────
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""  # auto-generated from chart name if empty
+
+# ────────────────────────────────────────────────────────────────────────────
+# Network Policy (disabled by default)
+# ────────────────────────────────────────────────────────────────────────────
+networkPolicy:
+  enabled: false

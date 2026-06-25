@@ -1,0 +1,308 @@
+# ────────────────────────────────────────────────────────────────────────────
+# Graphon Demo App — 6 microservices with owner labels
+# Each service runs nginx and is labelled so Graphon auto-discovers ownership.
+# The traffic-generator pod calls all services in a continuous loop.
+# ────────────────────────────────────────────────────────────────────────────
+
+# ── ConfigMap: nginx stub response ──────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-stub-config
+  namespace: graphon-demo
+data:
+  default.conf: |
+    server {
+      listen 80;
+      location /health { return 200 "ok\n"; }
+      location / { return 200 "stub\n"; }
+    }
+
+---
+# ── frontend ────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: graphon-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+        app.kubernetes.io/name: frontend
+        app.graphon.io/owner-team: "frontend-team"
+        app.graphon.io/owner-email: "frontend@example.com"
+        app.graphon.io/owner-slack: "#frontend"
+    spec:
+      containers:
+        - name: frontend
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/conf.d
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 64Mi }
+      volumes:
+        - name: config
+          configMap:
+            name: nginx-stub-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: graphon-demo
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# ── gateway ──────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: graphon-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+        app.graphon.io/owner-team: "platform-team"
+        app.graphon.io/owner-email: "platform@example.com"
+        app.graphon.io/owner-slack: "#platform"
+    spec:
+      containers:
+        - name: gateway
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/conf.d
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 64Mi }
+      volumes:
+        - name: config
+          configMap:
+            name: nginx-stub-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: graphon-demo
+spec:
+  selector:
+    app: gateway
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# ── orders ────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+  namespace: graphon-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orders
+  template:
+    metadata:
+      labels:
+        app: orders
+        app.graphon.io/owner-team: "orders-team"
+        app.graphon.io/owner-email: "orders@example.com"
+        app.graphon.io/owner-slack: "#orders"
+    spec:
+      containers:
+        - name: orders
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/conf.d
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 64Mi }
+      volumes:
+        - name: config
+          configMap:
+            name: nginx-stub-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders
+  namespace: graphon-demo
+spec:
+  selector:
+    app: orders
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# ── payments ──────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments
+  namespace: graphon-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payments
+  template:
+    metadata:
+      labels:
+        app: payments
+        app.graphon.io/owner-team: "payments-team"
+        app.graphon.io/owner-email: "payments@example.com"
+        app.graphon.io/owner-slack: "#payments"
+    spec:
+      containers:
+        - name: payments
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/conf.d
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 64Mi }
+      volumes:
+        - name: config
+          configMap:
+            name: nginx-stub-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payments
+  namespace: graphon-demo
+spec:
+  selector:
+    app: payments
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# ── catalog ───────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  namespace: graphon-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: catalog
+  template:
+    metadata:
+      labels:
+        app: catalog
+        app.graphon.io/owner-team: "catalog-team"
+        app.graphon.io/owner-email: "catalog@example.com"
+        app.graphon.io/owner-slack: "#catalog"
+    spec:
+      containers:
+        - name: catalog
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/conf.d
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 64Mi }
+      volumes:
+        - name: config
+          configMap:
+            name: nginx-stub-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog
+  namespace: graphon-demo
+spec:
+  selector:
+    app: catalog
+  ports:
+    - port: 80
+      targetPort: 80
+
+---
+# ── notifications ─────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notifications
+  namespace: graphon-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notifications
+  template:
+    metadata:
+      labels:
+        app: notifications
+        app.graphon.io/owner-team: "platform-team"
+        app.graphon.io/owner-email: "platform@example.com"
+        app.graphon.io/owner-slack: "#platform"
+    spec:
+      containers:
+        - name: notifications
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/conf.d
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 64Mi }
+      volumes:
+        - name: config
+          configMap:
+            name: nginx-stub-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notifications
+  namespace: graphon-demo
+spec:
+  selector:
+    app: notifications
+  ports:
+    - port: 80
+      targetPort: 80

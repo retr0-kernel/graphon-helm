@@ -1,0 +1,68 @@
+╔═══════════════════════════════════════════════════════════════════════╗
+║              Graphon {{ .Chart.AppVersion }} — Successfully Installed              ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+Runtime dependency intelligence is now running in your cluster.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  WAIT FOR PODS TO BE READY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} -w
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  VALIDATE INSTALLATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+  # Or run the validate script:
+  curl -sSL https://raw.githubusercontent.com/retr0-kernel/graphon/main/graphon-helm/scripts/validate-install.sh | \
+    NAMESPACE={{ .Release.Namespace }} RELEASE={{ .Release.Name }} bash
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ACCESS GRAPHON
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{{- if .Values.ingress.enabled }}
+  UI  → https://{{ .Values.ingress.hosts.ui }}
+  API → https://{{ .Values.ingress.hosts.api }}
+{{- else }}
+  Port-forward to access locally:
+
+  # UI
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "graphon.ui.fullname" . }} 3000:80 &
+  open http://localhost:3000
+
+  # Backend API
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "graphon.backend.fullname" . }} 8080:8080 &
+  curl http://localhost:8080/ready | jq .
+
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  FIRST STEPS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. Open the UI in your browser
+  2. Seed demo data (optional):
+     kubectl apply -f https://raw.githubusercontent.com/retr0-kernel/graphon/main/graphon-helm/examples/demo-app/
+
+  3. Add ownership labels to your pods:
+     app.graphon.io/owner-team: "my-team"
+     app.graphon.io/owner-email: "my-team@example.com"
+
+  4. Seed baselines after traffic is visible:
+     kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "graphon.backend.fullname" . }} 8080:8080 &
+     curl -X POST http://localhost:8080/api/v1/drift/seed \
+       -H 'X-Tenant-ID: {{ .Values.agent.tenantId }}' \
+       -H 'X-Cluster-ID: <your-cluster-id>'
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  DOCUMENTATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Getting started:  https://github.com/retr0-kernel/graphon/blob/main/graphon-helm/docs/getting-started.md
+  Full docs:        https://github.com/retr0-kernel/graphon/blob/main/graphon-helm/docs/
+
+  Report issues:    https://github.com/retr0-kernel/graphon/issues

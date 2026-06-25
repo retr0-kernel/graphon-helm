@@ -1,0 +1,10 @@
+.git/
+.gitignore
+.DS_Store
+*.swp
+*.swo
+*.orig
+# Real chart dependencies are downloaded by 'helm dependency update'
+# The stub charts/ directory is for local template validation only
+# and is excluded from packaged charts.
+# charts/ is intentionally NOT listed here because helm package needs it.

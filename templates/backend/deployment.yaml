@@ -1,0 +1,96 @@
+{{- if .Values.backend.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "graphon.backend.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "graphon.backend.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "graphon.backend.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "graphon.backend.selectorLabels" . | nindent 8 }}
+      {{- with .Values.backend.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "graphon.serviceAccountName" . }}
+      {{- with .Values.backend.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: backend
+          image: {{ include "graphon.backend.image" . }}
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "8080"
+            - name: AUTH_DISABLED
+              value: {{ .Values.backend.authDisabled | quote }}
+            - name: BASELINE_DAYS
+              value: {{ .Values.backend.baselineDays | quote }}
+            - name: CORS_ORIGINS
+              value: {{ .Values.backend.corsOrigins | quote }}
+            # ── Neo4j ───────────────────────────────────────────────────────
+            - name: NEO4J_URI
+              value: {{ include "graphon.neo4jURI" . | quote }}
+            - name: NEO4J_USER
+              value: {{ if .Values.neo4j.enabled }}neo4j{{ else }}{{ .Values.externalNeo4j.username | default "neo4j" }}{{ end }}
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "graphon.neo4jSecretName" . }}
+                  key: {{ include "graphon.neo4jSecretKey" . }}
+            # ── PostgreSQL ──────────────────────────────────────────────────
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "graphon.postgresSecretName" . }}
+                  key: {{ include "graphon.postgresSecretKey" . }}
+            - name: POSTGRES_DSN
+              value: {{ include "graphon.postgresDSN" . | quote }}
+            {{- with .Values.backend.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.backend.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.backend.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.backend.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+      {{- with .Values.backend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,39 @@
+apiVersion: v2
+name: graphon
+description: |
+  Graphon – Runtime Dependency Intelligence & Governance Platform.
+  Automatically discovers how services communicate inside Kubernetes using eBPF,
+  and answers: Who owns this? Can I delete it? Is this dependency expected?
+type: application
+version: 0.2.0
+appVersion: "v0.2.0"
+home: https://github.com/retr0-kernel/graphon
+sources:
+  - https://github.com/retr0-kernel/graphon
+maintainers:
+  - name: Graphon Team
+    email: team@graphon.io
+keywords:
+  - observability
+  - ebpf
+  - service-mesh
+  - governance
+  - dependency-graph
+annotations:
+  artifacthub.io/license: MIT
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/recommendations: |
+    - url: https://artifacthub.io/packages/helm/bitnami/postgresql
+
+dependencies:
+  - name: postgresql
+    version: "15.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+    alias: postgresql
+
+  - name: neo4j
+    version: "5.x.x"
+    repository: "https://helm.neo4j.com/neo4j"
+    condition: neo4j.enabled
+    alias: neo4j
