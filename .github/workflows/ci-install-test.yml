@@ -36,7 +36,6 @@ jobs:
     name: Helm install on Kind
     runs-on: ubuntu-latest
     # Budget: ~18 min.
-    # Neo4j alone needs 5-7 min in Kind; PostgreSQL adds ~2 min; backend adds ~1 min.
     timeout-minutes: 22
 
     steps:
