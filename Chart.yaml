@@ -7,9 +7,12 @@ description: |
 type: application
 version: 0.2.0
 appVersion: "v0.2.0"
-home: https://github.com/retr0-kernel/graphon
+home: https://github.com/retr0-kernel/graphon-helm
 sources:
-  - https://github.com/retr0-kernel/graphon
+  - https://github.com/retr0-kernel/graphon-helm
+  - https://github.com/retr0-kernel/graphon-backend
+  - https://github.com/retr0-kernel/graphon-ui
+  - https://github.com/retr0-kernel/graphon-bpf
 maintainers:
   - name: Graphon Team
     email: team@graphon.io

@@ -1,0 +1,222 @@
+name: Installation Test (Kind)
+
+# Runs a full Helm install in a real Kind (Kubernetes-in-Docker) cluster.
+# Validates that every component starts healthy and helm test passes.
+# This workflow is intended to be a required check before merging.
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  HELM_VERSION: "3.15.2"
+  KIND_VERSION:  "v0.23.0"
+  CLUSTER_NAME:  graphon-ci
+  RELEASE_NAME:  graphon
+  NAMESPACE:     graphon
+
+jobs:
+  install-test:
+    name: Helm install on Kind
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Tool setup ────────────────────────────────────────────────────────────
+      - name: Install Helm ${{ env.HELM_VERSION }}
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1
+        with:
+          version:      ${{ env.KIND_VERSION }}
+          cluster_name: ${{ env.CLUSTER_NAME }}
+          wait:         120s
+
+      # ── Helm preparation ──────────────────────────────────────────────────────
+      - name: Add upstream Helm repos
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo add neo4j   https://helm.neo4j.com/neo4j
+          helm repo update
+
+      - name: Fetch chart dependencies
+        run: helm dependency update .
+
+      - name: Lint chart (strict)
+        run: helm lint . --strict
+
+      # ── Install ───────────────────────────────────────────────────────────────
+      - name: Install Graphon
+        run: |
+          helm install ${{ env.RELEASE_NAME }} . \
+            --namespace ${{ env.NAMESPACE }} \
+            --create-namespace \
+            --set agent.tenantId=ci-test \
+            --set neo4j.neo4j.password=ci-test-password \
+            --set backend.image.tag=latest \
+            --set ui.image.tag=latest \
+            --set agent.image.tag=latest \
+            --timeout 5m \
+            --wait
+
+      # ── Wait for all workloads ─────────────────────────────────────────────
+      - name: Wait for backend deployment
+        run: |
+          kubectl -n ${{ env.NAMESPACE }} rollout status deployment/${{ env.RELEASE_NAME }}-backend \
+            --timeout=120s
+
+      - name: Wait for UI deployment
+        run: |
+          kubectl -n ${{ env.NAMESPACE }} rollout status deployment/${{ env.RELEASE_NAME }}-ui \
+            --timeout=120s
+
+      - name: Wait for agent DaemonSet
+        run: |
+          kubectl -n ${{ env.NAMESPACE }} rollout status daemonset/${{ env.RELEASE_NAME }}-agent \
+            --timeout=120s
+
+      # ── Fail-fast on bad pod states ────────────────────────────────────────
+      - name: Check for failing pods
+        run: |
+          BAD_PODS=$(kubectl -n ${{ env.NAMESPACE }} get pods --no-headers 2>/dev/null \
+            | awk '{print $1, $3}' \
+            | grep -E "CrashLoopBackOff|ErrImagePull|ImagePullBackOff|CreateContainerConfigError|OOMKilled" \
+            || true)
+
+          if [[ -n "$BAD_PODS" ]]; then
+            echo "ERROR: Pods in a failing state:"
+            echo "$BAD_PODS"
+            exit 1
+          fi
+          echo "All pods are in a healthy state."
+
+      # ── helm test ─────────────────────────────────────────────────────────
+      - name: Run helm test
+        run: |
+          helm test ${{ env.RELEASE_NAME }} \
+            --namespace ${{ env.NAMESPACE }} \
+            --timeout 2m
+
+      # ── Validate endpoints ─────────────────────────────────────────────────
+      - name: Validate backend /api/v1/health
+        run: |
+          kubectl -n ${{ env.NAMESPACE }} port-forward \
+            svc/${{ env.RELEASE_NAME }}-backend 18080:8080 &
+          PF_PID=$!
+          sleep 3
+
+          RESP=$(curl -sf http://localhost:18080/api/v1/health || echo '{}')
+          STATUS=$(echo "$RESP" | jq -r '.status // "error"' 2>/dev/null || echo "error")
+
+          kill "$PF_PID" 2>/dev/null || true
+
+          if [[ "$STATUS" != "ok" ]]; then
+            echo "ERROR: /api/v1/health returned status=${STATUS}"
+            echo "Response: $RESP"
+            exit 1
+          fi
+          echo "PASS: /api/v1/health → status=ok"
+
+      - name: Validate backend /ready
+        run: |
+          kubectl -n ${{ env.NAMESPACE }} port-forward \
+            svc/${{ env.RELEASE_NAME }}-backend 18081:8080 &
+          PF_PID=$!
+          sleep 3
+
+          RESP=$(curl -sf http://localhost:18081/ready || echo '{}')
+          READY=$(echo "$RESP" | jq -r '.ready // false' 2>/dev/null || echo "false")
+
+          kill "$PF_PID" 2>/dev/null || true
+
+          if [[ "$READY" != "true" ]]; then
+            echo "ERROR: /ready returned ready=${READY}"
+            echo "Response: $RESP"
+            exit 1
+          fi
+          echo "PASS: /ready → ready=true"
+
+      - name: Validate UI is reachable
+        run: |
+          kubectl -n ${{ env.NAMESPACE }} port-forward \
+            svc/${{ env.RELEASE_NAME }}-ui 13000:80 &
+          PF_PID=$!
+          sleep 3
+
+          HTTP_CODE=$(curl -o /dev/null -sf -w "%{http_code}" \
+            http://localhost:13000/ || echo "000")
+
+          kill "$PF_PID" 2>/dev/null || true
+
+          if [[ "$HTTP_CODE" != "200" ]]; then
+            echo "ERROR: UI returned HTTP $HTTP_CODE (expected 200)"
+            exit 1
+          fi
+          echo "PASS: UI → HTTP 200"
+
+      # ── Diagnostics on failure ─────────────────────────────────────────────
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          echo "=== kubectl get all ==="
+          kubectl -n ${{ env.NAMESPACE }} get all || true
+
+          echo ""
+          echo "=== kubectl get events (sorted) ==="
+          kubectl -n ${{ env.NAMESPACE }} get events \
+            --sort-by='.lastTimestamp' || true
+
+          echo ""
+          echo "=== Pod descriptions ==="
+          kubectl -n ${{ env.NAMESPACE }} describe pods || true
+
+          echo ""
+          echo "=== Backend logs ==="
+          kubectl -n ${{ env.NAMESPACE }} logs \
+            -l "app.kubernetes.io/component=backend" \
+            --tail=80 || true
+
+          echo ""
+          echo "=== Agent logs ==="
+          kubectl -n ${{ env.NAMESPACE }} logs \
+            -l "app.kubernetes.io/component=agent" \
+            --tail=40 || true
+
+          echo ""
+          echo "=== Neo4j logs ==="
+          kubectl -n ${{ env.NAMESPACE }} logs \
+            -l "app.kubernetes.io/component=neo4j" \
+            --tail=40 || true
+
+          echo ""
+          echo "=== PostgreSQL logs ==="
+          kubectl -n ${{ env.NAMESPACE }} logs \
+            -l "app.kubernetes.io/component=postgresql" \
+            --tail=40 || true
+
+      # ── Cleanup ───────────────────────────────────────────────────────────
+      - name: Destroy Kind cluster
+        if: always()
+        run: kind delete cluster --name ${{ env.CLUSTER_NAME }}

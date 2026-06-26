@@ -1,6 +1,6 @@
 # ────────────────────────────────────────────────────────────────────────────
 # Graphon Helm Chart — values.yaml
-# Full reference: https://github.com/retr0-kernel/graphon/blob/main/graphon-helm/docs/kubernetes-installation.md
+# Full reference: https://github.com/retr0-kernel/graphon-helm/blob/main/docs/kubernetes-installation.md
 # ────────────────────────────────────────────────────────────────────────────
 
 # -- Global image settings shared across all components.
