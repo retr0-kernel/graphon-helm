@@ -30,7 +30,7 @@ annotations:
 
 dependencies:
   - name: postgresql
-    version: "15.x.x"
+    version: "18.x.x"
     repository: "https://charts.bitnami.com/bitnami"
     condition: postgresql.enabled
     alias: postgresql
