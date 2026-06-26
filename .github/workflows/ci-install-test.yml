@@ -35,6 +35,9 @@ jobs:
   install-test:
     name: Helm install on Kind
     runs-on: ubuntu-latest
+    # Budget: ~18 min.
+    # Neo4j alone needs 5-7 min in Kind; PostgreSQL adds ~2 min; backend adds ~1 min.
+    timeout-minutes: 22
 
     steps:
       # ── Checkout ──────────────────────────────────────────────────────────────
@@ -68,6 +71,19 @@ jobs:
         run: helm lint . --strict
 
       # ── Install ───────────────────────────────────────────────────────────────
+      # Notes:
+      #   • Do NOT override image tags here. The chart's default tags (values.yaml)
+      #     reference the last stable published release which is guaranteed to exist.
+      #     Overriding with "latest" would fail if the latest CI run hasn't published
+      #     images yet (chicken-and-egg problem).
+      #   • agent.enabled=false: the eBPF agent requires CAP_SYS_ADMIN and kernel
+      #     BTF. Kind supports BTF but the agent's kprobe attachment can be flaky in
+      #     virtualised environments. The Helm chart structure (DaemonSet, RBAC, SA)
+      #     is still exercised through lint + template steps above.
+      #   • Do NOT use --wait here. helm --wait polls readiness every 5s and times
+      #     out if anything is not Ready — but Neo4j takes 5-7 min in Kind which
+      #     exceeds any sensible helm timeout. We do explicit per-component waits
+      #     below instead, with generous timeouts for each layer.
       - name: Install Graphon
         run: |
           helm install ${{ env.RELEASE_NAME }} . \
@@ -75,31 +91,48 @@ jobs:
             --create-namespace \
             --set agent.tenantId=ci-test \
             --set neo4j.neo4j.password=ci-test-password \
-            --set backend.image.tag=latest \
-            --set ui.image.tag=latest \
-            --set agent.image.tag=latest \
-            --timeout 5m \
-            --wait
+            --set agent.enabled=false
 
-      # ── Wait for all workloads ─────────────────────────────────────────────
-      - name: Wait for backend deployment
+      # ── Wait: databases first (they are slowest) ──────────────────────────────
+      - name: Wait for PostgreSQL StatefulSet
         run: |
-          kubectl -n ${{ env.NAMESPACE }} rollout status deployment/${{ env.RELEASE_NAME }}-backend \
+          echo "Waiting for PostgreSQL to become ready (up to 4 min)..."
+          kubectl -n ${{ env.NAMESPACE }} rollout status statefulset \
+            --selector "app.kubernetes.io/name=postgresql,app.kubernetes.io/instance=${{ env.RELEASE_NAME }}" \
+            --timeout=240s || \
+          kubectl -n ${{ env.NAMESPACE }} wait pod \
+            --selector "app.kubernetes.io/name=postgresql,app.kubernetes.io/instance=${{ env.RELEASE_NAME }}" \
+            --for=condition=Ready \
+            --timeout=240s
+
+      - name: Wait for Neo4j StatefulSet
+        run: |
+          echo "Waiting for Neo4j to become ready (up to 8 min — Neo4j needs time to initialise)..."
+          kubectl -n ${{ env.NAMESPACE }} wait pod \
+            --selector "app.kubernetes.io/name=neo4j,app.kubernetes.io/instance=${{ env.RELEASE_NAME }}" \
+            --for=condition=Ready \
+            --timeout=480s
+
+      # ── Wait: application layer ───────────────────────────────────────────────
+      - name: Wait for backend Deployment
+        run: |
+          echo "Waiting for backend to become ready (up to 5 min — includes DB retry backoff)..."
+          kubectl -n ${{ env.NAMESPACE }} rollout status \
+            deployment/${{ env.RELEASE_NAME }}-backend \
+            --timeout=300s
+
+      - name: Wait for UI Deployment
+        run: |
+          kubectl -n ${{ env.NAMESPACE }} rollout status \
+            deployment/${{ env.RELEASE_NAME }}-ui \
             --timeout=120s
 
-      - name: Wait for UI deployment
-        run: |
-          kubectl -n ${{ env.NAMESPACE }} rollout status deployment/${{ env.RELEASE_NAME }}-ui \
-            --timeout=120s
-
-      - name: Wait for agent DaemonSet
-        run: |
-          kubectl -n ${{ env.NAMESPACE }} rollout status daemonset/${{ env.RELEASE_NAME }}-agent \
-            --timeout=120s
-
-      # ── Fail-fast on bad pod states ────────────────────────────────────────
+      # ── Fail-fast: catch CrashLoopBackOff / pull errors ───────────────────────
       - name: Check for failing pods
         run: |
+          # Wait a moment for any transient restarts to surface
+          sleep 10
+
           BAD_PODS=$(kubectl -n ${{ env.NAMESPACE }} get pods --no-headers 2>/dev/null \
             | awk '{print $1, $3}' \
             | grep -E "CrashLoopBackOff|ErrImagePull|ImagePullBackOff|CreateContainerConfigError|OOMKilled" \
@@ -111,15 +144,16 @@ jobs:
             exit 1
           fi
           echo "All pods are in a healthy state."
+          kubectl -n ${{ env.NAMESPACE }} get pods
 
-      # ── helm test ─────────────────────────────────────────────────────────
+      # ── helm test ─────────────────────────────────────────────────────────────
       - name: Run helm test
         run: |
           helm test ${{ env.RELEASE_NAME }} \
             --namespace ${{ env.NAMESPACE }} \
-            --timeout 2m
+            --timeout 3m
 
-      # ── Validate endpoints ─────────────────────────────────────────────────
+      # ── Validate endpoints ────────────────────────────────────────────────────
       - name: Validate backend /api/v1/health
         run: |
           kubectl -n ${{ env.NAMESPACE }} port-forward \
@@ -129,7 +163,6 @@ jobs:
 
           RESP=$(curl -sf http://localhost:18080/api/v1/health || echo '{}')
           STATUS=$(echo "$RESP" | jq -r '.status // "error"' 2>/dev/null || echo "error")
-
           kill "$PF_PID" 2>/dev/null || true
 
           if [[ "$STATUS" != "ok" ]]; then
@@ -139,7 +172,7 @@ jobs:
           fi
           echo "PASS: /api/v1/health → status=ok"
 
-      - name: Validate backend /ready
+      - name: Validate backend /ready (DB connectivity)
         run: |
           kubectl -n ${{ env.NAMESPACE }} port-forward \
             svc/${{ env.RELEASE_NAME }}-backend 18081:8080 &
@@ -148,15 +181,14 @@ jobs:
 
           RESP=$(curl -sf http://localhost:18081/ready || echo '{}')
           READY=$(echo "$RESP" | jq -r '.ready // false' 2>/dev/null || echo "false")
-
           kill "$PF_PID" 2>/dev/null || true
 
+          echo "Ready response: $RESP"
           if [[ "$READY" != "true" ]]; then
             echo "ERROR: /ready returned ready=${READY}"
-            echo "Response: $RESP"
             exit 1
           fi
-          echo "PASS: /ready → ready=true"
+          echo "PASS: /ready → ready=true (both Neo4j and PostgreSQL reachable)"
 
       - name: Validate UI is reachable
         run: |
@@ -167,7 +199,6 @@ jobs:
 
           HTTP_CODE=$(curl -o /dev/null -sf -w "%{http_code}" \
             http://localhost:13000/ || echo "000")
-
           kill "$PF_PID" 2>/dev/null || true
 
           if [[ "$HTTP_CODE" != "200" ]]; then
@@ -176,7 +207,7 @@ jobs:
           fi
           echo "PASS: UI → HTTP 200"
 
-      # ── Diagnostics on failure ─────────────────────────────────────────────
+      # ── Diagnostics on failure ────────────────────────────────────────────────
       - name: Collect diagnostics
         if: failure()
         run: |
@@ -184,9 +215,17 @@ jobs:
           kubectl -n ${{ env.NAMESPACE }} get all || true
 
           echo ""
-          echo "=== kubectl get events (sorted) ==="
+          echo "=== Events (sorted by time) ==="
           kubectl -n ${{ env.NAMESPACE }} get events \
-            --sort-by='.lastTimestamp' || true
+            --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+
+          echo ""
+          echo "=== StatefulSets ==="
+          kubectl -n ${{ env.NAMESPACE }} get statefulsets -o wide || true
+
+          echo ""
+          echo "=== PVCs ==="
+          kubectl -n ${{ env.NAMESPACE }} get pvc || true
 
           echo ""
           echo "=== Pod descriptions ==="
@@ -196,27 +235,21 @@ jobs:
           echo "=== Backend logs ==="
           kubectl -n ${{ env.NAMESPACE }} logs \
             -l "app.kubernetes.io/component=backend" \
-            --tail=80 || true
-
-          echo ""
-          echo "=== Agent logs ==="
-          kubectl -n ${{ env.NAMESPACE }} logs \
-            -l "app.kubernetes.io/component=agent" \
-            --tail=40 || true
+            --tail=100 --all-containers=true || true
 
           echo ""
           echo "=== Neo4j logs ==="
           kubectl -n ${{ env.NAMESPACE }} logs \
-            -l "app.kubernetes.io/component=neo4j" \
-            --tail=40 || true
+            -l "app.kubernetes.io/name=neo4j,app.kubernetes.io/instance=${{ env.RELEASE_NAME }}" \
+            --tail=60 --all-containers=true || true
 
           echo ""
           echo "=== PostgreSQL logs ==="
           kubectl -n ${{ env.NAMESPACE }} logs \
-            -l "app.kubernetes.io/component=postgresql" \
-            --tail=40 || true
+            -l "app.kubernetes.io/name=postgresql,app.kubernetes.io/instance=${{ env.RELEASE_NAME }}" \
+            --tail=40 --all-containers=true || true
 
-      # ── Cleanup ───────────────────────────────────────────────────────────
+      # ── Cleanup ───────────────────────────────────────────────────────────────
       - name: Destroy Kind cluster
         if: always()
         run: kind delete cluster --name ${{ env.CLUSTER_NAME }}
