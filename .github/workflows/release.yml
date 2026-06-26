@@ -1,0 +1,237 @@
+name: Helm Chart Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+# One chart release at a time; never cancel an in-flight release.
+concurrency:
+  group: helm-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write    # create GitHub Releases, push gh-pages
+  packages: write    # push OCI chart to GHCR
+
+env:
+  HELM_VERSION: "3.15.2"
+  CHART_DIR: "."   # the Chart.yaml is at the root of this repo
+  OCI_REGISTRY: ghcr.io/retr0-kernel/charts
+  PAGES_URL: https://retr0-kernel.github.io/graphon-helm
+
+jobs:
+  release:
+    name: Package, publish, release
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── Setup ──────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history is needed for helm-chart-releaser GitHub Pages update
+          fetch-depth: 0
+
+      - name: Configure Git (for gh-pages push)
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Install Helm ${{ env.HELM_VERSION }}
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      # ── Resolve chart version from the pushed tag ──────────────────────────
+      - name: Derive chart version from tag
+        id: version
+        run: |
+          # Tag is e.g. v0.2.1 — strip the leading 'v' for chart version
+          CHART_VERSION="${GITHUB_REF_NAME#v}"
+          echo "chart_version=${CHART_VERSION}"  >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}"           >> "$GITHUB_OUTPUT"
+
+      # ── Patch Chart.yaml version to match the tag ──────────────────────────
+      # This ensures the packaged chart version exactly matches the git tag.
+      - name: Patch Chart.yaml version
+        run: |
+          CHART_VERSION="${{ steps.version.outputs.chart_version }}"
+          sed -i "s/^version:.*/version: ${CHART_VERSION}/" ${{ env.CHART_DIR }}/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${{ steps.version.outputs.tag }}\"/" ${{ env.CHART_DIR }}/Chart.yaml
+          echo "Chart.yaml after patching:"
+          grep -E "^(name|version|appVersion):" ${{ env.CHART_DIR }}/Chart.yaml
+
+      # ── Add upstream chart repositories ────────────────────────────────────
+      - name: Add upstream Helm repos
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo add neo4j   https://helm.neo4j.com/neo4j
+          helm repo update
+
+      # ── Fetch chart dependencies ───────────────────────────────────────────
+      - name: Update chart dependencies
+        run: helm dependency update ${{ env.CHART_DIR }}/
+
+      # ── Quality gates ──────────────────────────────────────────────────────
+      - name: Lint chart (strict)
+        run: |
+          helm lint ${{ env.CHART_DIR }}/ --strict
+
+      - name: Lint with external DB values (no embedded DBs)
+        run: |
+          helm lint ${{ env.CHART_DIR }}/ --strict \
+            --set postgresql.enabled=false \
+            --set externalPostgresql.host=pg.example.com \
+            --set externalPostgresql.password=ci-test \
+            --set neo4j.enabled=false \
+            --set externalNeo4j.boltUrl=bolt://neo4j.example.com:7687 \
+            --set externalNeo4j.password=ci-test
+
+      - name: Template render sanity check (embedded)
+        run: |
+          helm template ci-test ${{ env.CHART_DIR }}/ \
+            --set agent.tenantId=ci \
+            --debug > /dev/null
+
+      - name: Template render sanity check (external DBs + ingress + TLS)
+        run: |
+          helm template ci-test ${{ env.CHART_DIR }}/ \
+            --set postgresql.enabled=false \
+            --set externalPostgresql.host=pg.example.com \
+            --set externalPostgresql.password=ci-test \
+            --set neo4j.enabled=false \
+            --set externalNeo4j.boltUrl=bolt://neo4j.example.com:7687 \
+            --set externalNeo4j.password=ci-test \
+            --set ingress.enabled=true \
+            --set ingress.tls.enabled=true \
+            --set ingress.hosts.ui=graphon.example.com \
+            --set ingress.hosts.api=api.graphon.example.com \
+            --debug > /dev/null
+
+      # ── Package the chart ──────────────────────────────────────────────────
+      - name: Package chart
+        run: |
+          mkdir -p /tmp/helm-pkg
+          helm package ${{ env.CHART_DIR }}/ \
+            --destination /tmp/helm-pkg/ \
+            --version ${{ steps.version.outputs.chart_version }} \
+            --app-version ${{ steps.version.outputs.tag }}
+
+          echo "Packaged artifacts:"
+          ls -lh /tmp/helm-pkg/
+
+      # ── Publish to GHCR OCI registry ──────────────────────────────────────
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push chart to GHCR OCI
+        run: |
+          for pkg in /tmp/helm-pkg/*.tgz; do
+            helm push "$pkg" oci://ghcr.io/retr0-kernel/charts
+            echo "Pushed: $pkg → oci://ghcr.io/retr0-kernel/charts"
+          done
+
+      - name: Verify OCI push
+        run: |
+          helm show chart oci://ghcr.io/retr0-kernel/charts/graphon \
+            --version ${{ steps.version.outputs.chart_version }}
+
+      # ── Publish to GitHub Pages (classic helm repo) ───────────────────────
+      # Consumers can use: helm repo add graphon https://retr0-kernel.github.io/graphon-helm
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+          # gh-pages may not exist yet on first release — continue and create it
+        continue-on-error: true
+
+      - name: Ensure gh-pages directory exists
+        run: mkdir -p gh-pages
+
+      - name: Copy chart package to gh-pages
+        run: cp /tmp/helm-pkg/*.tgz gh-pages/
+
+      - name: Regenerate Helm repo index
+        run: |
+          if [[ -f gh-pages/index.yaml ]]; then
+            helm repo index gh-pages/ \
+              --url ${{ env.PAGES_URL }} \
+              --merge gh-pages/index.yaml
+          else
+            helm repo index gh-pages/ \
+              --url ${{ env.PAGES_URL }}
+          fi
+          echo "index.yaml entry count:"
+          grep "^  version:" gh-pages/index.yaml | wc -l
+
+      - name: Publish to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./gh-pages
+          publish_branch: gh-pages
+          keep_files: true
+          commit_message: "chore(helm): release ${{ steps.version.outputs.tag }}"
+
+      # ── Create GitHub Release ──────────────────────────────────────────────
+      - name: Extract release notes
+        id: notes
+        run: |
+          NOTE_FILE="docs/kubernetes-installation.md"
+          # Use the kubernetes-installation doc as a pointer; real notes are in
+          # graphon-backend repo. Fall back to auto-generation.
+          if [[ -f "docs/releases/${{ steps.version.outputs.tag }}.md" ]]; then
+            echo "body_path=docs/releases/${{ steps.version.outputs.tag }}.md" >> "$GITHUB_OUTPUT"
+          else
+            echo "body_path=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "graphon-helm ${{ steps.version.outputs.tag }}"
+          body: |
+            ## Helm Chart ${{ steps.version.outputs.tag }}
+
+            ### Install
+
+            **OCI (recommended):**
+            ```bash
+            helm install graphon oci://ghcr.io/retr0-kernel/charts/graphon \
+              --version ${{ steps.version.outputs.chart_version }} \
+              --namespace graphon \
+              --create-namespace
+            ```
+
+            **Classic Helm repo:**
+            ```bash
+            helm repo add graphon ${{ env.PAGES_URL }}
+            helm repo update
+            helm install graphon graphon/graphon \
+              --version ${{ steps.version.outputs.chart_version }} \
+              --namespace graphon \
+              --create-namespace
+            ```
+
+            ### Image tags for this chart version
+
+            | Component | Image |
+            |---|---|
+            | Backend | `ghcr.io/retr0-kernel/graphon-backend:${{ steps.version.outputs.tag }}` |
+            | UI | `ghcr.io/retr0-kernel/graphon-ui:${{ steps.version.outputs.tag }}` |
+            | Agent | `ghcr.io/retr0-kernel/graphon-agent:${{ steps.version.outputs.tag }}` |
+
+            ### Documentation
+            - [Getting Started](https://github.com/retr0-kernel/graphon-helm/blob/main/docs/getting-started.md)
+            - [Kubernetes Installation](https://github.com/retr0-kernel/graphon-helm/blob/main/docs/kubernetes-installation.md)
+            - [Release Process](https://github.com/retr0-kernel/graphon-helm/blob/main/docs/release-process.md)
+          files: /tmp/helm-pkg/*.tgz
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}
