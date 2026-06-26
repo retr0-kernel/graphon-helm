@@ -141,7 +141,7 @@ agent:
   image:
     registry: ghcr.io
     repository: retr0-kernel/graphon-agent
-    tag: "v0.2.7"
+    tag: "v0.2.8"
     pullPolicy: IfNotPresent
 
   # How often to flush captured events to the backend
