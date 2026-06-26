@@ -1,0 +1,44 @@
+apiVersion: v1
+entries:
+  graphon:
+  - annotations:
+      artifacthub.io/license: MIT
+      artifacthub.io/prerelease: "false"
+      artifacthub.io/recommendations: |
+        - url: https://artifacthub.io/packages/helm/bitnami/postgresql
+    apiVersion: v2
+    appVersion: v0.2.2
+    created: "2026-06-26T11:35:55.60144808Z"
+    dependencies:
+    - alias: postgresql
+      condition: postgresql.enabled
+      name: postgresql
+      repository: https://charts.bitnami.com/bitnami
+      version: 15.x.x
+    - alias: neo4j
+      condition: neo4j.enabled
+      name: neo4j
+      repository: https://helm.neo4j.com/neo4j
+      version: 5.x.x
+    description: 'Graphon – Runtime Dependency Intelligence & Governance Platform.
+      Automatically discovers how services communicate inside Kubernetes using eBPF,
+      and answers: Who owns this? Can I delete it? Is this dependency expected? '
+    digest: 91ebcc6c153976987f016d43964259b9f3da51f98b1334be07bc7002dd4eef43
+    home: https://github.com/retr0-kernel/graphon
+    keywords:
+    - observability
+    - ebpf
+    - service-mesh
+    - governance
+    - dependency-graph
+    maintainers:
+    - email: team@graphon.io
+      name: Graphon Team
+    name: graphon
+    sources:
+    - https://github.com/retr0-kernel/graphon
+    type: application
+    urls:
+    - https://retr0-kernel.github.io/graphon-helm/graphon-0.2.2.tgz
+    version: 0.2.2
+generated: "2026-06-26T11:35:55.595592934Z"
