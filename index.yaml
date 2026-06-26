@@ -7,8 +7,48 @@ entries:
       artifacthub.io/recommendations: |
         - url: https://artifacthub.io/packages/helm/bitnami/postgresql
     apiVersion: v2
+    appVersion: v0.2.4
+    created: "2026-06-26T11:55:03.258568608Z"
+    dependencies:
+    - alias: postgresql
+      condition: postgresql.enabled
+      name: postgresql
+      repository: https://charts.bitnami.com/bitnami
+      version: 15.x.x
+    - alias: neo4j
+      condition: neo4j.enabled
+      name: neo4j
+      repository: https://helm.neo4j.com/neo4j
+      version: 5.x.x
+    description: 'Graphon – Runtime Dependency Intelligence & Governance Platform.
+      Automatically discovers how services communicate inside Kubernetes using eBPF,
+      and answers: Who owns this? Can I delete it? Is this dependency expected? '
+    digest: 82b7c0dd8a4d54aec9199012886e3fab07d45ae1f7015ddc1028e17002242c7a
+    home: https://github.com/retr0-kernel/graphon
+    keywords:
+    - observability
+    - ebpf
+    - service-mesh
+    - governance
+    - dependency-graph
+    maintainers:
+    - email: team@graphon.io
+      name: Graphon Team
+    name: graphon
+    sources:
+    - https://github.com/retr0-kernel/graphon
+    type: application
+    urls:
+    - https://retr0-kernel.github.io/graphon-helm/graphon-0.2.4.tgz
+    version: 0.2.4
+  - annotations:
+      artifacthub.io/license: MIT
+      artifacthub.io/prerelease: "false"
+      artifacthub.io/recommendations: |
+        - url: https://artifacthub.io/packages/helm/bitnami/postgresql
+    apiVersion: v2
     appVersion: v0.2.3
-    created: "2026-06-26T11:51:15.316735651Z"
+    created: "2026-06-26T11:55:03.25077897Z"
     dependencies:
     - alias: postgresql
       condition: postgresql.enabled
@@ -48,7 +88,7 @@ entries:
         - url: https://artifacthub.io/packages/helm/bitnami/postgresql
     apiVersion: v2
     appVersion: v0.2.2
-    created: "2026-06-26T11:51:15.31064249Z"
+    created: "2026-06-26T11:55:03.24283871Z"
     dependencies:
     - alias: postgresql
       condition: postgresql.enabled
@@ -81,4 +121,4 @@ entries:
     urls:
     - https://retr0-kernel.github.io/graphon-helm/graphon-0.2.2.tgz
     version: 0.2.2
-generated: "2026-06-26T11:51:15.30358229Z"
+generated: "2026-06-26T11:55:03.234364187Z"
