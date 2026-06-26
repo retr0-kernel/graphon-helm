@@ -46,27 +46,42 @@ spec:
               value: {{ .Values.backend.baselineDays | quote }}
             - name: CORS_ORIGINS
               value: {{ .Values.backend.corsOrigins | quote }}
-            # ── Neo4j ───────────────────────────────────────────────────────
+
+            # ── Neo4j ─────────────────────────────────────────────────────
             - name: NEO4J_URI
               value: {{ include "graphon.neo4jURI" . | quote }}
             - name: NEO4J_USER
-              value: {{ if .Values.neo4j.enabled }}neo4j{{ else }}{{ .Values.externalNeo4j.username | default "neo4j" }}{{ end }}
+              value: {{ if .Values.neo4j.enabled -}}neo4j{{- else -}}{{ .Values.externalNeo4j.username | default "neo4j" }}{{- end }}
             - name: NEO4J_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "graphon.neo4jSecretName" . }}
                   key: {{ include "graphon.neo4jSecretKey" . }}
-            # ── PostgreSQL ──────────────────────────────────────────────────
+
+            # ── PostgreSQL (individual vars — backend assembles the DSN) ──
+            # Passing individual components instead of a pre-assembled DSN
+            # avoids the fragile $(VAR) interpolation trick and decouples
+            # secret management from connection string composition.
+            - name: POSTGRES_HOST
+              value: {{ include "graphon.postgresHost" . | quote }}
+            - name: POSTGRES_PORT
+              value: {{ include "graphon.postgresPort" . | quote }}
+            - name: POSTGRES_DB
+              value: {{ include "graphon.postgresDB" . | quote }}
+            - name: POSTGRES_USER
+              value: {{ include "graphon.postgresUser" . | quote }}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "graphon.postgresSecretName" . }}
                   key: {{ include "graphon.postgresSecretKey" . }}
-            - name: POSTGRES_DSN
-              value: {{ include "graphon.postgresDSN" . | quote }}
+            - name: POSTGRES_SSL_MODE
+              value: {{ if .Values.postgresql.enabled -}}disable{{- else -}}{{ .Values.externalPostgresql.sslMode | default "require" }}{{- end }}
+
             {{- with .Values.backend.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+
           {{- with .Values.backend.startupProbe }}
           startupProbe:
             {{- toYaml . | nindent 12 }}

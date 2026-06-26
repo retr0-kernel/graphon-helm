@@ -111,6 +111,19 @@ app.kubernetes.io/component: agent
 {{- printf "%s/%s:%s" $registry .Values.agent.image.repository .Values.agent.image.tag -}}
 {{- end }}
 
+{{/*
+Name of the Secret that holds the agent API key.
+Precedence: existingSecret → generated "<fullname>-agent-creds" (when apiKey is set).
+Returns an empty string when neither is configured — caller must guard with {{- if ... }}.
+*/}}
+{{- define "graphon.agent.secretName" -}}
+{{- if .Values.agent.existingSecret -}}
+  {{- .Values.agent.existingSecret -}}
+{{- else if .Values.agent.apiKey -}}
+  {{- printf "%s-agent-creds" (include "graphon.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
 {{/* ── Service Account ─────────────────────────────────────────────────── */}}
 
 {{- define "graphon.serviceAccountName" -}}
@@ -121,47 +134,58 @@ app.kubernetes.io/component: agent
 {{- end }}
 {{- end }}
 
-{{/* ── Database connection strings ──────────────────────────────────────── */}}
+{{/* ── PostgreSQL ───────────────────────────────────────────────────────── */}}
 
 {{/*
-PostgreSQL DSN — embedded or external.
+PostgreSQL host.
+Embedded: bitnami creates a Service named "<Release.Name>-postgresql".
+External:  use externalPostgresql.host.
 */}}
-{{- define "graphon.postgresDSN" -}}
+{{- define "graphon.postgresHost" -}}
 {{- if .Values.postgresql.enabled -}}
-  {{- $host := printf "%s-postgresql" (include "graphon.fullname" .) -}}
-  {{- $user := .Values.postgresql.auth.username | default "graphon" -}}
-  {{- $db   := .Values.postgresql.auth.database | default "graphon" -}}
-  {{- printf "postgres://%s:$(POSTGRES_PASSWORD)@%s:5432/%s?sslmode=disable" $user $host $db -}}
+  {{- printf "%s-postgresql" .Release.Name -}}
 {{- else -}}
-  {{- $host := .Values.externalPostgresql.host -}}
-  {{- $port := .Values.externalPostgresql.port | default 5432 -}}
-  {{- $user := .Values.externalPostgresql.username -}}
-  {{- $db   := .Values.externalPostgresql.database -}}
-  {{- $ssl  := .Values.externalPostgresql.sslMode | default "require" -}}
-  {{- printf "postgres://%s:$(POSTGRES_PASSWORD)@%s:%d/%s?sslmode=%s" $user $host (int $port) $db $ssl -}}
+  {{- required "externalPostgresql.host is required when postgresql.enabled=false" .Values.externalPostgresql.host -}}
+{{- end -}}
+{{- end }}
+
+{{- define "graphon.postgresPort" -}}
+{{- if .Values.postgresql.enabled -}}
+  5432
+{{- else -}}
+  {{- .Values.externalPostgresql.port | default 5432 -}}
+{{- end -}}
+{{- end }}
+
+{{- define "graphon.postgresDB" -}}
+{{- if .Values.postgresql.enabled -}}
+  {{- .Values.postgresql.auth.database | default "graphon" -}}
+{{- else -}}
+  {{- .Values.externalPostgresql.database | default "graphon" -}}
+{{- end -}}
+{{- end }}
+
+{{- define "graphon.postgresUser" -}}
+{{- if .Values.postgresql.enabled -}}
+  {{- .Values.postgresql.auth.username | default "graphon" -}}
+{{- else -}}
+  {{- .Values.externalPostgresql.username | default "graphon" -}}
 {{- end -}}
 {{- end }}
 
 {{/*
-Neo4j bolt URI — embedded or external.
-*/}}
-{{- define "graphon.neo4jURI" -}}
-{{- if .Values.neo4j.enabled -}}
-  {{- printf "bolt://%s:7687" (include "graphon.fullname" .) -}}
-{{- else -}}
-  {{- .Values.externalNeo4j.boltUrl -}}
-{{- end -}}
-{{- end }}
-
-{{/*
-Name of secret holding POSTGRES_PASSWORD.
+Name of the Secret holding POSTGRES_PASSWORD.
+Embedded: bitnami generates "<Release.Name>-postgresql" with key "password".
+Note: we use .Release.Name (not graphon.fullname) because the bitnami subchart
+names its own secret from the parent release name, not from our fullname helper.
+External:  either existingSecret or the one we create as "<fullname>-external-pg".
 */}}
 {{- define "graphon.postgresSecretName" -}}
 {{- if .Values.postgresql.enabled -}}
   {{- if .Values.postgresql.auth.existingSecret -}}
     {{- .Values.postgresql.auth.existingSecret -}}
   {{- else -}}
-    {{- printf "%s-postgresql" (include "graphon.fullname" .) -}}
+    {{- printf "%s-postgresql" .Release.Name -}}
   {{- end -}}
 {{- else -}}
   {{- if .Values.externalPostgresql.existingSecret -}}
@@ -173,7 +197,8 @@ Name of secret holding POSTGRES_PASSWORD.
 {{- end }}
 
 {{/*
-Key for POSTGRES_PASSWORD inside the secret.
+Key inside the postgres secret that contains the password.
+Bitnami uses "password" for the application user (auth.username).
 */}}
 {{- define "graphon.postgresSecretKey" -}}
 {{- if .Values.postgresql.enabled -}}
@@ -187,12 +212,34 @@ Key for POSTGRES_PASSWORD inside the secret.
 {{- end -}}
 {{- end }}
 
+{{/* ── Neo4j ─────────────────────────────────────────────────────────────── */}}
+
 {{/*
-Name of secret holding NEO4J_PASSWORD.
+Neo4j bolt URI.
+Embedded: the neo4j/neo4j subchart creates a Service named after neo4j.neo4j.name
+          (not the parent chart fullname). Default name is "graphon".
+External:  use externalNeo4j.boltUrl.
+*/}}
+{{- define "graphon.neo4jURI" -}}
+{{- if .Values.neo4j.enabled -}}
+  {{- $svcName := .Values.neo4j.neo4j.name | default "graphon" -}}
+  {{- printf "bolt://%s:7687" $svcName -}}
+{{- else -}}
+  {{- required "externalNeo4j.boltUrl is required when neo4j.enabled=false" .Values.externalNeo4j.boltUrl -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Name of the Secret holding NEO4J_PASSWORD.
+Embedded: we create our own "<fullname>-neo4j-creds" secret (see backend/secret.yaml).
+          We do NOT reference the neo4j subchart's secret because that chart stores
+          the password as "NEO4J_AUTH" (format: "neo4j/<password>"), not as a raw
+          password string that the backend can use directly.
+External:  either existingSecret or the one we create as "<fullname>-external-neo4j".
 */}}
 {{- define "graphon.neo4jSecretName" -}}
 {{- if .Values.neo4j.enabled -}}
-  {{- printf "%s-neo4j-passwords" (include "graphon.fullname" .) -}}
+  {{- printf "%s-neo4j-creds" (include "graphon.fullname" .) -}}
 {{- else -}}
   {{- if .Values.externalNeo4j.existingSecret -}}
     {{- .Values.externalNeo4j.existingSecret -}}
@@ -203,11 +250,12 @@ Name of secret holding NEO4J_PASSWORD.
 {{- end }}
 
 {{/*
-Key for NEO4J_PASSWORD inside the secret.
+Key inside the neo4j secret.
+Our own secrets always use "password" as the key.
 */}}
 {{- define "graphon.neo4jSecretKey" -}}
 {{- if .Values.neo4j.enabled -}}
-  NEO4J_PASSWORD
+  password
 {{- else -}}
   {{- .Values.externalNeo4j.existingSecretKey | default "password" -}}
 {{- end -}}

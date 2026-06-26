@@ -227,7 +227,7 @@ printf "  ${GREEN}Passed : %d${RESET}\n" "$PASS"
 if (( FAIL > 0 )); then
   printf "  ${RED}Failed : %d${RESET}\n" "$FAIL"
   printf "\n  ${RED}${BOLD}✗ Installation has issues. Check the failed items above.${RESET}\n\n"
-  printf "  Troubleshooting: https://github.com/retr0-kernel/graphon/blob/main/graphon-helm/docs/troubleshooting.md\n\n"
+  printf "  Troubleshooting: https://github.com/retr0-kernel/graphon-helm/blob/main/docs/troubleshooting.md\n\n"
   exit 1
 else
   printf "\n  ${GREEN}${BOLD}✓ Graphon is healthy and ready!${RESET}\n\n"

@@ -75,6 +75,16 @@ spec:
                   fieldPath: spec.nodeName
             - name: FLUSH_INTERVAL
               value: {{ .Values.agent.flushInterval | quote }}
+            # API key — only injected when configured.
+            # Required when backend.authDisabled=false; safe to omit otherwise.
+            {{- $agentSecretName := include "graphon.agent.secretName" . }}
+            {{- if $agentSecretName }}
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $agentSecretName }}
+                  key: {{ .Values.agent.existingSecretKey | default "api-key" }}
+            {{- end }}
           resources:
             {{- toYaml .Values.agent.resources | nindent 12 }}
           volumeMounts:

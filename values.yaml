@@ -156,6 +156,17 @@ agent:
   # Run on all nodes including masters/control-plane
   tolerateAllTaints: true
 
+  # API key for authenticating agent → backend calls.
+  # Only required when backend.authDisabled=false.
+  # Set ONE of:
+  #   apiKey: "gph_..."             → chart creates a Secret named <fullname>-agent-creds
+  #   existingSecret: "my-secret"   → use a pre-existing Secret (must contain key set by existingSecretKey)
+  #   existingSecretKey: "api-key"  → key inside existingSecret (default: "api-key")
+  # Leave all empty when authDisabled=true (default self-hosted mode).
+  apiKey: ""
+  existingSecret: ""
+  existingSecretKey: "api-key"
+
   resources:
     requests:
       cpu: 50m
@@ -250,8 +261,11 @@ neo4j:
   neo4j:
     name: graphon
     edition: community
-    # Password auto-generated if not set. To specify:
-    # password: "your-password"
+    # Password used by the neo4j subchart AND by our graphon-neo4j-creds Secret.
+    # IMPORTANT: This MUST be set. The chart will fail if left empty.
+    # Change this in production — the default is intentionally weak so Kind/dev
+    # installs work out of the box without extra steps.
+    password: "graphon-neo4j-password"
 
   volumes:
     data:
