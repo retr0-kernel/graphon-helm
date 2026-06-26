@@ -1,0 +1,77 @@
+# ────────────────────────────────────────────────────────────────────────────
+# Graphon Helm Chart — values-large-cluster.yaml  (HIGH-RESOURCE PROFILE)
+#
+# Sizing for large environments: 500+ microservices, heavy graph query load,
+# or compliance requirements that mandate dedicated node pools.
+#
+# Apply on top of the production profile:
+#
+#   helm install graphon . \
+#     -f values-production.yaml \
+#     -f values-large-cluster.yaml
+#
+# Minimum cluster: 5+ nodes, each with ≥ 16 vCPU and ≥ 32 GB RAM.
+# ────────────────────────────────────────────────────────────────────────────
+
+# ── Backend ──────────────────────────────────────────────────────────────────
+backend:
+  replicaCount: 3
+
+  resources:
+    requests:
+      cpu: "1"
+      memory: 1Gi
+    limits:
+      cpu: "4"
+      memory: 4Gi
+
+# ── UI ───────────────────────────────────────────────────────────────────────
+ui:
+  replicaCount: 3
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# ── Agent ────────────────────────────────────────────────────────────────────
+agent:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# ── PostgreSQL ────────────────────────────────────────────────────────────────
+postgresql:
+  primary:
+    persistence:
+      size: 500Gi
+
+    resources:
+      requests:
+        cpu: "2"
+        memory: 4Gi
+      limits:
+        cpu: "8"
+        memory: 16Gi
+
+# ── Neo4j ────────────────────────────────────────────────────────────────────
+# Flat resource format: cpu/memory set BOTH requests and limits.
+neo4j:
+  neo4j:
+    resources:
+      cpu: "8000m"    # 8 vCPU — handles 1000+ node / 10 000+ edge graphs
+      memory: "16Gi"  # 16 Gi heap
+
+  volumes:
+    data:
+      mode: defaultStorageClass
+      defaultStorageClass:
+        requests:
+          storage: 500Gi

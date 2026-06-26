@@ -1,26 +1,41 @@
 # Graphon Helm Chart
 
-[![Helm Version](https://img.shields.io/badge/helm-v0.2.7-blue)](https://github.com/retr0-kernel/graphon-helm)
-[![App Version](https://img.shields.io/badge/app-v0.2.7-green)](https://github.com/retr0-kernel/graphon-helm)
+[![Helm Version](https://img.shields.io/badge/helm-v0.2.9-blue)](https://github.com/retr0-kernel/graphon-helm)
+[![App Version](https://img.shields.io/badge/app-v0.2.9-green)](https://github.com/retr0-kernel/graphon-helm)
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/graphon)](https://artifacthub.io/packages/search?repo=graphon)
 
 **Graphon** is a Runtime Dependency Intelligence & Governance Platform that uses eBPF to automatically map service dependencies in Kubernetes — no instrumentation, no sidecars, no code changes.
 
 ## Install
 
-**OCI (recommended):**
-```bash
-helm install graphon oci://ghcr.io/retr0-kernel/charts/graphon \
-  --version 0.2.0 \
-  --namespace graphon \
-  --create-namespace
-```
+### Local / development cluster (Kind, Minikube, k3d, Docker Desktop, Killercoda)
 
-**Classic Helm repo:**
 ```bash
 helm repo add graphon https://retr0-kernel.github.io/graphon-helm
 helm repo update
 helm install graphon graphon/graphon --namespace graphon --create-namespace
+```
+
+Default `values.yaml` is optimised for small clusters (≥ 2 vCPU, ≥ 4 GB total RAM).  All pods will be Running within ~2 minutes.
+
+### Production cluster
+
+```bash
+helm install graphon graphon/graphon \
+  --namespace graphon \
+  --create-namespace \
+  -f https://raw.githubusercontent.com/retr0-kernel/graphon-helm/main/values-production.yaml \
+  --set neo4j.neo4j.password=$(openssl rand -hex 24)
+```
+
+### Large cluster (500+ microservices)
+
+```bash
+helm install graphon graphon/graphon \
+  --namespace graphon \
+  --create-namespace \
+  -f https://raw.githubusercontent.com/retr0-kernel/graphon-helm/main/values-production.yaml \
+  -f https://raw.githubusercontent.com/retr0-kernel/graphon-helm/main/values-large-cluster.yaml
 ```
 
 ## Access
@@ -43,14 +58,20 @@ open http://localhost:3000
 | [Troubleshooting](./docs/troubleshooting.md) | Fix common issues |
 | [Release Process](./docs/release-process.md) | How releases are published |
 
-## Values Quick Reference
+## Configuration Profiles
+
+| File | Target environment | Neo4j memory | Backend replicas |
+|------|-------------------|-------------|-----------------|
+| [`values.yaml`](./values.yaml) | Kind · Minikube · Docker Desktop · Killercoda | 1 Gi | 1 |
+| [`values-production.yaml`](./values-production.yaml) | EKS · GKE · AKS · bare-metal | 4 Gi | 2 |
+| [`values-large-cluster.yaml`](./values-large-cluster.yaml) | 500+ microservices | 16 Gi | 3 |
+
+### Key overrides
 
 ```yaml
-# Minimal production override
+# Typical production additions on top of values-production.yaml
 backend:
-  replicaCount: 2
-  authDisabled: false
-  baselineDays: 14
+  authDisabled: false    # require API keys
 
 agent:
   tenantId: "my-company"
@@ -66,7 +87,7 @@ ingress:
     enabled: true
 ```
 
-Full values reference: [`values.yaml`](./values.yaml)
+Full parameter reference: [`values.yaml`](./values.yaml)
 
 ## Validate Installation
 

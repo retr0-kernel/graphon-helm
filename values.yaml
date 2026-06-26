@@ -1,6 +1,18 @@
 # ────────────────────────────────────────────────────────────────────────────
-# Graphon Helm Chart — values.yaml
-# Full reference: https://github.com/retr0-kernel/graphon-helm/blob/main/docs/kubernetes-installation.md
+# Graphon Helm Chart — values.yaml  (DEVELOPER / LOCAL-CLUSTER DEFAULTS)
+#
+# These defaults are optimised for the first-run experience on small local
+# clusters: Kind, Minikube, k3d, Docker Desktop Kubernetes, Killercoda, and
+# GitHub Actions (~2 vCPU / 4–8 GB RAM total).
+#
+# Production deployments should always overlay a production-sized file:
+#
+#   helm install graphon . -f values-production.yaml
+#
+# A high-resource example is available in values-large-cluster.yaml.
+#
+# Full parameter reference:
+#   https://github.com/retr0-kernel/graphon-helm/blob/main/docs/kubernetes-installation.md
 # ────────────────────────────────────────────────────────────────────────────
 
 # -- Global image settings shared across all components.
@@ -36,6 +48,8 @@ backend:
     type: ClusterIP
     port: 8080
 
+  # Dev-sized resources — enough for a 2-node Kind/Minikube cluster.
+  # Increase in production: see values-production.yaml
   resources:
     requests:
       cpu: 100m
@@ -44,14 +58,14 @@ backend:
       cpu: 500m
       memory: 512Mi
 
-  # Probes
+  # Probes — generous timeouts for slow local clusters.
   startupProbe:
     httpGet:
       path: /ready
       port: 8080
     initialDelaySeconds: 5
     periodSeconds: 5
-    failureThreshold: 12   # 60s total startup budget
+    failureThreshold: 24   # 120 s startup budget (Neo4j can be slow first boot)
 
   readinessProbe:
     httpGet:
@@ -59,13 +73,13 @@ backend:
       port: 8080
     initialDelaySeconds: 5
     periodSeconds: 10
-    failureThreshold: 3
+    failureThreshold: 6
 
   livenessProbe:
     httpGet:
       path: /api/v1/health
       port: 8080
-    initialDelaySeconds: 30
+    initialDelaySeconds: 60
     periodSeconds: 30
     failureThreshold: 3
 
@@ -76,7 +90,6 @@ backend:
   podSecurityContext: {}
 
   # Extra environment variables to inject into the backend pod.
-  # Useful for LOG_LEVEL, CORS_ORIGINS, etc.
   extraEnv: []
   # - name: LOG_LEVEL
   #   value: debug
@@ -99,7 +112,6 @@ ui:
     port: 80
 
   # The UI needs to know where to reach the backend.
-  # Set this to the external URL if ingress is enabled, e.g. https://api.graphon.example.com
   # Leave empty to use the in-cluster backend service (http://graphon-backend:8080).
   apiUrl: ""
 
@@ -133,7 +145,8 @@ ui:
 # ────────────────────────────────────────────────────────────────────────────
 # eBPF Agent (DaemonSet)
 # Requires Linux kernel ≥ 5.4 and CAP_SYS_ADMIN / privileged.
-# Does NOT work on managed Fargate nodes or GKE Autopilot.
+# Runs in graceful degraded mode (no crash) on environments where eBPF is
+# unavailable (Kind without vDSO, GKE Autopilot, AWS Fargate).
 # ────────────────────────────────────────────────────────────────────────────
 agent:
   enabled: true
@@ -158,11 +171,7 @@ agent:
 
   # API key for authenticating agent → backend calls.
   # Only required when backend.authDisabled=false.
-  # Set ONE of:
-  #   apiKey: "gph_..."             → chart creates a Secret named <fullname>-agent-creds
-  #   existingSecret: "my-secret"   → use a pre-existing Secret (must contain key set by existingSecretKey)
-  #   existingSecretKey: "api-key"  → key inside existingSecret (default: "api-key")
-  # Leave all empty when authDisabled=true (default self-hosted mode).
+  # Leave all empty in default self-hosted mode (authDisabled=true).
   apiKey: ""
   existingSecret: ""
   existingSecretKey: "api-key"
@@ -176,7 +185,6 @@ agent:
       memory: 256Mi
 
   nodeSelector: {}
-  # Additional tolerations beyond the all-taints toleration
   tolerations: []
   podAnnotations: {}
 
@@ -187,8 +195,6 @@ ingress:
   enabled: false
   className: "nginx"
 
-  # cert-manager ClusterIssuer annotation.
-  # Set to your issuer name or remove to manage TLS manually.
   certManagerIssuer: "letsencrypt-prod"
 
   hosts:
@@ -197,19 +203,14 @@ ingress:
 
   tls:
     enabled: false
-    # Secrets are auto-created by cert-manager when certManagerIssuer is set.
-    # Set manually if not using cert-manager:
     uiSecretName: "graphon-ui-tls"
     apiSecretName: "graphon-api-tls"
 
   annotations: {}
-  # nginx.ingress.kubernetes.io/proxy-body-size: "10m"
-  # nginx.ingress.kubernetes.io/ssl-redirect: "true"
 
 # ────────────────────────────────────────────────────────────────────────────
 # PostgreSQL — embedded (bitnami/postgresql)
-# Set postgresql.enabled=false and provide externalPostgresql to use
-# your own database.
+# Set postgresql.enabled=false and provide externalPostgresql to use your own.
 # ────────────────────────────────────────────────────────────────────────────
 postgresql:
   enabled: true
@@ -217,24 +218,19 @@ postgresql:
   auth:
     username: graphon
     database: graphon
-    # Password is auto-generated if not set. To specify:
-    # password: "your-password"
-    # Or use an existing secret:
-    # existingSecret: "my-pg-secret"
-    # secretKeys:
-    #   adminPasswordKey: postgres-password
-    #   userPasswordKey: password
+    # password: ""        # auto-generated if not set
+    # existingSecret: ""
 
   primary:
     persistence:
       enabled: true
-      size: 10Gi
-      # storageClass: ""  # leave empty for cluster default
+      size: 5Gi           # 5 Gi is plenty for dev; increase to 50+ Gi in production
 
+    # Dev-sized: bitnami postgresql uses standard requests/limits format
     resources:
       requests:
         cpu: 100m
-        memory: 256Mi
+        memory: 128Mi
       limits:
         cpu: 500m
         memory: 512Mi
@@ -245,15 +241,20 @@ externalPostgresql:
   port: 5432
   database: graphon
   username: graphon
-  # Provide password via existingSecret (recommended) or plaintext (dev only):
   password: ""
-  existingSecret: ""         # secret name
-  existingSecretKey: "password"  # key inside the secret
-  sslMode: "require"         # disable | require | verify-full
+  existingSecret: ""
+  existingSecretKey: "password"
+  sslMode: "require"
 
 # ────────────────────────────────────────────────────────────────────────────
 # Neo4j — embedded (neo4j/neo4j)
 # Set neo4j.enabled=false and provide externalNeo4j to use your own instance.
+#
+# IMPORTANT — resource format:
+#   The neo4j community helm chart uses a flat resource format where `cpu` and
+#   `memory` set BOTH requests and limits to the same value.  Standard k8s
+#   requests/limits sub-keys are not supported by this subchart.
+#   Path: neo4j.neo4j.resources.{cpu,memory}
 # ────────────────────────────────────────────────────────────────────────────
 neo4j:
   enabled: true
@@ -261,36 +262,46 @@ neo4j:
   neo4j:
     name: graphon
     edition: community
-    # Password used by the neo4j subchart AND by our graphon-neo4j-creds Secret.
-    # IMPORTANT: This MUST be set. The chart will fail if left empty.
-    # Change this in production — the default is intentionally weak so Kind/dev
-    # installs work out of the box without extra steps.
+    # Default password is intentionally simple for local dev.
+    # CHANGE THIS before any internet-facing deployment.
     password: "graphon-neo4j-password"
+
+    # Dev-sized resources (flat format required by the neo4j community chart).
+    # cpu/memory set BOTH the request AND the limit to the same value.
+    #
+    # ⚠  The neo4j community chart enforces a hard minimum of 2 Gi memory.
+    #    This means each Kubernetes node must have ≥ 3 Gi allocatable memory
+    #    (≈ 4 GB total RAM after OS/K8s overhead) to schedule this pod.
+    #
+    #    Kind (Docker Desktop ≥ 8 GB, or --memory=4096):  ✓ fits
+    #    Minikube (--memory=4096 or larger):               ✓ fits
+    #    GitHub Actions (standard runner, 7 GB RAM):       ✓ fits
+    #    Killercoda (2 × 4 GB nodes):                      ✓ fits
+    #    2 GB total cluster:                               ✗ use external Neo4j
+    #
+    #    External Neo4j AuraDB (free tier):
+    #      neo4j.enabled=false  +  externalNeo4j.boltUrl=...
+    #
+    # Production sizing: see values-production.yaml
+    resources:
+      cpu: "500m"     # default subchart value is "1000m" — halved for dev
+      memory: "2Gi"   # hard minimum enforced by the neo4j community chart
 
   volumes:
     data:
       mode: defaultStorageClass
       defaultStorageClass:
         requests:
-          storage: 10Gi
-
-  resources:
-    requests:
-      cpu: 500m
-      memory: 1Gi
-    limits:
-      cpu: 2000m
-      memory: 2Gi
+          storage: 5Gi  # 5 Gi for dev; increase to 100+ Gi in production
 
   services:
     neo4j:
-      enabled: false   # no external LB — we use cluster-internal bolt only
+      enabled: false   # no external LB — use cluster-internal Bolt only
 
 # External Neo4j — used when neo4j.enabled=false
 externalNeo4j:
   boltUrl: ""     # e.g. bolt://neo4j.example.com:7687
   username: neo4j
-  # Provide password via existingSecret (recommended) or plaintext (dev only):
   password: ""
   existingSecret: ""
   existingSecretKey: "password"
@@ -301,7 +312,7 @@ externalNeo4j:
 serviceAccount:
   create: true
   annotations: {}
-  name: ""  # auto-generated from chart name if empty
+  name: ""
 
 # ────────────────────────────────────────────────────────────────────────────
 # Network Policy (disabled by default)

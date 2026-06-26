@@ -1,0 +1,134 @@
+# ────────────────────────────────────────────────────────────────────────────
+# Graphon Helm Chart — values-production.yaml  (PRODUCTION PROFILE)
+#
+# Overrides values.yaml with production-grade resource sizing, HA replica
+# counts, and security hardening.  Apply on top of the defaults:
+#
+#   helm install graphon . -f values-production.yaml
+#
+# Or for upgrading an existing release:
+#
+#   helm upgrade graphon . -f values-production.yaml --reuse-values
+#
+# Minimum cluster: 3+ nodes, each with ≥ 4 vCPU and ≥ 8 GB RAM.
+# Recommended:     3–5 nodes, each with ≥ 8 vCPU and ≥ 16 GB RAM.
+#
+# For very large deployments (100+ microservices) see values-large-cluster.yaml
+# ────────────────────────────────────────────────────────────────────────────
+
+# ── Backend ──────────────────────────────────────────────────────────────────
+backend:
+  replicaCount: 2   # active-active; scale to 3+ under high query load
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+  # Tighter probes for production — fail fast instead of waiting
+  startupProbe:
+    httpGet:
+      path: /ready
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    failureThreshold: 12   # 60 s
+
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    failureThreshold: 3
+
+  livenessProbe:
+    httpGet:
+      path: /api/v1/health
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    failureThreshold: 3
+
+  # Spread replicas across zones for availability
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: graphon
+                app.kubernetes.io/component: backend
+            topologyKey: topology.kubernetes.io/zone
+
+# ── UI ───────────────────────────────────────────────────────────────────────
+ui:
+  replicaCount: 2
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: graphon
+                app.kubernetes.io/component: ui
+            topologyKey: topology.kubernetes.io/zone
+
+# ── Agent ────────────────────────────────────────────────────────────────────
+agent:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── PostgreSQL (embedded bitnami chart) ──────────────────────────────────────
+postgresql:
+  primary:
+    persistence:
+      enabled: true
+      size: 50Gi
+
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
+
+# ── Neo4j (embedded neo4j community chart) ───────────────────────────────────
+# The neo4j community chart uses a flat resource format: cpu/memory set
+# BOTH requests and limits to the same value.  Path: neo4j.neo4j.resources
+neo4j:
+  neo4j:
+    # REQUIRED: change to a strong password before deployment.
+    # Use: helm upgrade ... --set neo4j.neo4j.password=$(openssl rand -hex 24)
+    password: "CHANGE_ME_BEFORE_DEPLOY"
+
+    resources:
+      cpu: "2000m"    # 2 vCPU — adequate for 50–200 microservices
+      memory: "4Gi"   # 4 Gi heap — adequate for 50–200 microservices
+
+  volumes:
+    data:
+      mode: defaultStorageClass
+      defaultStorageClass:
+        requests:
+          storage: 100Gi

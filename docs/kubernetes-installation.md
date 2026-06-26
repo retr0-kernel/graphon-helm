@@ -1,6 +1,6 @@
 # Kubernetes Installation Guide
 
-This guide covers a complete production installation of Graphon on Kubernetes — from a fresh cluster to a running, TLS-secured deployment with external databases.
+This guide covers the complete installation of Graphon on Kubernetes — from local dev clusters to production deployments with TLS and external databases.
 
 For a quick 3-command install, see [Getting Started](./getting-started.md).
 
@@ -9,13 +9,16 @@ For a quick 3-command install, see [Getting Started](./getting-started.md).
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)
-2. [Add the Helm Repository](#1-add-the-helm-repository)
-3. [Minimal Install (embedded databases)](#2-minimal-install-embedded-databases)
-4. [Production Install (external databases + TLS)](#3-production-install-external-databases--tls)
-5. [Configuration Reference](#4-configuration-reference)
-6. [Upgrading](#5-upgrading)
-7. [Uninstalling](#6-uninstalling)
-8. [Air-gapped Installation](#7-air-gapped-installation)
+2. [Configuration Profiles](#configuration-profiles)
+3. [Add the Helm Repository](#1-add-the-helm-repository)
+4. [Local / Dev Install](#2-local--dev-install-kind-minikube-docker-desktop)
+5. [Production Install](#3-production-install)
+6. [Large Cluster Install](#4-large-cluster-install)
+7. [External Databases](#5-external-databases)
+8. [Configuration Reference](#6-configuration-reference)
+9. [Upgrading](#7-upgrading)
+10. [Uninstalling](#8-uninstalling)
+11. [Air-gapped Installation](#9-air-gapped-installation)
 
 ---
 
@@ -23,20 +26,43 @@ For a quick 3-command install, see [Getting Started](./getting-started.md).
 
 | Tool | Version | Install |
 |---|---|---|
-| Kubernetes | ≥ 1.26 | GKE, EKS, AKS, k3s |
+| Kubernetes | ≥ 1.26 | Kind · Minikube · GKE · EKS · AKS · k3s |
 | Helm | ≥ 3.12 | `brew install helm` |
 | kubectl | ≥ 1.26 | included with cluster CLI |
 | cert-manager | ≥ 1.13 (optional) | TLS automation |
 | NGINX Ingress | any (optional) | external access |
 
-> **Node requirement:** The eBPF agent runs only on Linux nodes with kernel ≥ 5.4. It requires `CAP_SYS_ADMIN`. It does **not** work on GKE Autopilot, AWS Fargate, or Azure Virtual Nodes.
+> **eBPF agent note:** The agent runs only on Linux nodes with kernel ≥ 5.4 and `CAP_SYS_ADMIN`. It does **not** work on GKE Autopilot, AWS Fargate, or Azure Virtual Nodes. In those environments it enters graceful degraded mode (stays Running, no event capture) and all other components work normally.
+
+---
+
+## Configuration Profiles
+
+Graphon ships three value files targeting different cluster sizes:
+
+| File | Target | Neo4j | Backend replicas | Min cluster |
+|------|--------|-------|-----------------|-------------|
+| `values.yaml` | Kind · Minikube · Docker Desktop · Killercoda | 500m CPU / 1 Gi | 1 | 2 nodes × 1 vCPU, 2 GB |
+| `values-production.yaml` | EKS · GKE · AKS · bare-metal | 2 vCPU / 4 Gi | 2 | 3 nodes × 4 vCPU, 8 GB |
+| `values-large-cluster.yaml` | 500+ microservices | 8 vCPU / 16 Gi | 3 | 5 nodes × 16 vCPU, 32 GB |
+
+Layer files are additive — apply them in order:
+```bash
+# Production
+helm install graphon graphon/graphon -f values-production.yaml
+
+# Large cluster (add on top of production)
+helm install graphon graphon/graphon \
+  -f values-production.yaml \
+  -f values-large-cluster.yaml
+```
 
 ---
 
 ## 1. Add the Helm Repository
 
 ```bash
-helm repo add graphon https://retr0-kernel.github.io/graphon
+helm repo add graphon https://retr0-kernel.github.io/graphon-helm
 helm repo update
 ```
 
@@ -47,35 +73,39 @@ helm search repo graphon --versions
 
 ---
 
-## 2. Minimal Install (embedded databases)
+## 2. Local / Dev Install (Kind, Minikube, Docker Desktop)
 
-The simplest path — PostgreSQL and Neo4j are installed automatically as chart sub-charts.
-
-**Best for:** evaluation, development, small teams.
+The default `values.yaml` is sized to run on any laptop cluster with ≥ 2 vCPU and ≥ 4 GB RAM total.  No extra flags needed.
 
 ```bash
-# Create namespace
 kubectl create namespace graphon
 
-# Install with defaults (embedded PostgreSQL + Neo4j)
 helm install graphon graphon/graphon \
   --namespace graphon \
-  --set agent.tenantId="my-company"
+  --create-namespace
 ```
 
-Wait for all pods to be ready (Neo4j takes 60–90s):
+Wait for all pods to be ready (Neo4j takes ~90 s on first boot):
 ```bash
 kubectl get pods -n graphon -w
 ```
 
-Expected output:
+Expected output after ~2 minutes:
 ```
 NAME                              READY   STATUS    RESTARTS
-graphon-backend-xxx               1/1     Running   0
+graphon-backend-xxx               1/1     Running   ≤1
 graphon-ui-xxx                    1/1     Running   0
 graphon-agent-xxx (on each node)  1/1     Running   0
 graphon-postgresql-0              1/1     Running   0
-graphon-neo4j-0                   1/1     Running   0
+graphon-0          (Neo4j)        1/1     Running   0
+```
+
+> **One restart on backend is normal** — it retries until Neo4j finishes initialising (exponential back-off, max 2 min).
+
+Access the UI:
+```bash
+kubectl port-forward -n graphon svc/graphon-ui 3000:80
+open http://localhost:3000
 ```
 
 Access the UI:
@@ -86,9 +116,42 @@ open http://localhost:3000
 
 ---
 
-## 3. Production Install (external databases + TLS)
+## 3. Production Install
 
-**Best for:** production deployments, managed databases (RDS, Cloud SQL, Neo4j AuraDB).
+Apply `values-production.yaml` on top of the defaults for 2× backend replicas, larger Neo4j, and anti-affinity rules.
+
+```bash
+NEO4J_PASS=$(openssl rand -hex 24)
+
+helm install graphon graphon/graphon \
+  --namespace graphon \
+  --create-namespace \
+  -f values-production.yaml \
+  --set neo4j.neo4j.password="${NEO4J_PASS}"
+```
+
+Store the password in your secrets manager immediately — it cannot be recovered from the chart after installation.
+
+---
+
+## 4. Large Cluster Install
+
+For environments with 500+ microservices, layer the large-cluster profile on top of the production profile:
+
+```bash
+helm install graphon graphon/graphon \
+  --namespace graphon \
+  --create-namespace \
+  -f values-production.yaml \
+  -f values-large-cluster.yaml \
+  --set neo4j.neo4j.password="${NEO4J_PASS}"
+```
+
+---
+
+## 5. Production Install with External Databases + TLS
+
+**Best for:** production deployments using managed databases (RDS, Cloud SQL, Neo4j AuraDB).
 
 ### 3.1 Install cert-manager (if not present)
 
@@ -267,7 +330,7 @@ curl http://localhost:8080/api/v1/graph \
 
 ---
 
-## 4. Configuration Reference
+## 6. Configuration Reference
 
 ### Backend
 
@@ -300,7 +363,7 @@ curl http://localhost:8080/api/v1/graph \
 
 ---
 
-## 5. Upgrading
+## 7. Upgrading
 
 ```bash
 helm repo update
@@ -320,7 +383,7 @@ helm upgrade graphon graphon/graphon \
 
 ---
 
-## 6. Uninstalling
+## 8. Uninstalling
 
 ```bash
 helm uninstall graphon --namespace graphon
@@ -337,7 +400,7 @@ helm uninstall graphon --namespace graphon
 
 ---
 
-## 7. Air-gapped Installation
+## 9. Air-gapped Installation
 
 For environments without internet access:
 
