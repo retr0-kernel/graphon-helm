@@ -7,8 +7,51 @@ entries:
       artifacthub.io/recommendations: |
         - url: https://artifacthub.io/packages/helm/bitnami/postgresql
     apiVersion: v2
+    appVersion: v0.2.6
+    created: "2026-06-26T14:12:31.71456583Z"
+    dependencies:
+    - alias: postgresql
+      condition: postgresql.enabled
+      name: postgresql
+      repository: https://charts.bitnami.com/bitnami
+      version: 18.x.x
+    - alias: neo4j
+      condition: neo4j.enabled
+      name: neo4j
+      repository: https://helm.neo4j.com/neo4j
+      version: 5.x.x
+    description: 'Graphon – Runtime Dependency Intelligence & Governance Platform.
+      Automatically discovers how services communicate inside Kubernetes using eBPF,
+      and answers: Who owns this? Can I delete it? Is this dependency expected? '
+    digest: 1cfb0b96dc1a9c3a5a7d13f6fb15411b5800709efb49bf684ce07038cd6a3063
+    home: https://github.com/retr0-kernel/graphon-helm
+    keywords:
+    - observability
+    - ebpf
+    - service-mesh
+    - governance
+    - dependency-graph
+    maintainers:
+    - email: team@graphon.io
+      name: Graphon Team
+    name: graphon
+    sources:
+    - https://github.com/retr0-kernel/graphon-helm
+    - https://github.com/retr0-kernel/graphon-backend
+    - https://github.com/retr0-kernel/graphon-ui
+    - https://github.com/retr0-kernel/graphon-bpf
+    type: application
+    urls:
+    - https://retr0-kernel.github.io/graphon-helm/graphon-0.2.6.tgz
+    version: 0.2.6
+  - annotations:
+      artifacthub.io/license: MIT
+      artifacthub.io/prerelease: "false"
+      artifacthub.io/recommendations: |
+        - url: https://artifacthub.io/packages/helm/bitnami/postgresql
+    apiVersion: v2
     appVersion: v0.2.5
-    created: "2026-06-26T12:50:31.003433119Z"
+    created: "2026-06-26T14:12:31.704455775Z"
     dependencies:
     - alias: postgresql
       condition: postgresql.enabled
@@ -51,7 +94,7 @@ entries:
         - url: https://artifacthub.io/packages/helm/bitnami/postgresql
     apiVersion: v2
     appVersion: v0.2.4
-    created: "2026-06-26T12:50:30.995154141Z"
+    created: "2026-06-26T14:12:31.696966733Z"
     dependencies:
     - alias: postgresql
       condition: postgresql.enabled
@@ -91,7 +134,7 @@ entries:
         - url: https://artifacthub.io/packages/helm/bitnami/postgresql
     apiVersion: v2
     appVersion: v0.2.3
-    created: "2026-06-26T12:50:30.98696624Z"
+    created: "2026-06-26T14:12:31.687977641Z"
     dependencies:
     - alias: postgresql
       condition: postgresql.enabled
@@ -131,7 +174,7 @@ entries:
         - url: https://artifacthub.io/packages/helm/bitnami/postgresql
     apiVersion: v2
     appVersion: v0.2.2
-    created: "2026-06-26T12:50:30.978690783Z"
+    created: "2026-06-26T14:12:31.675758856Z"
     dependencies:
     - alias: postgresql
       condition: postgresql.enabled
@@ -164,4 +207,4 @@ entries:
     urls:
     - https://retr0-kernel.github.io/graphon-helm/graphon-0.2.2.tgz
     version: 0.2.2
-generated: "2026-06-26T12:50:30.96998858Z"
+generated: "2026-06-26T14:12:31.663636449Z"
