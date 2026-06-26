@@ -35,8 +35,12 @@ jobs:
   install-test:
     name: Helm install on Kind
     runs-on: ubuntu-latest
-    # Budget: ~18 min.
-    timeout-minutes: 22
+    # Budget: ~25 min.
+    # GitHub runners pull images at ~100 Mbps.
+    # PostgreSQL (Bitnami, ~300 MB): ~5 min pull + 1 min init = 6 min
+    # Neo4j (~450 MB):               ~6 min pull + 4 min init = 10 min
+    # Backend + UI:                  small images + DB backoff = 4 min
+    timeout-minutes: 30
 
     steps:
       # ── Checkout ──────────────────────────────────────────────────────────────
@@ -92,39 +96,57 @@ jobs:
             --set neo4j.neo4j.password=ci-test-password \
             --set agent.enabled=false
 
-      # ── Wait: databases first (they are slowest) ──────────────────────────────
-      - name: Wait for PostgreSQL StatefulSet
-        run: |
-          echo "Waiting for PostgreSQL to become ready (up to 4 min)..."
-          kubectl -n ${{ env.NAMESPACE }} rollout status statefulset \
-            --selector "app.kubernetes.io/name=postgresql,app.kubernetes.io/instance=${{ env.RELEASE_NAME }}" \
-            --timeout=240s || \
-          kubectl -n ${{ env.NAMESPACE }} wait pod \
-            --selector "app.kubernetes.io/name=postgresql,app.kubernetes.io/instance=${{ env.RELEASE_NAME }}" \
-            --for=condition=Ready \
-            --timeout=240s
+      # ── Wait: databases first (they are the slowest layer) ───────────────────
+      # Why separate waits per layer instead of helm install --wait:
+      #   --wait gives one shared budget for ALL resources. Neo4j alone needs
+      #   8-10 min in Kind. With a shared budget anything under 12 min will
+      #   time out every run. Per-component waits give each layer its own
+      #   budget and make failures easier to diagnose.
+      #
+      # Why kubectl wait pod (not rollout status):
+      #   `kubectl rollout status statefulset --selector` is unreliable —
+      #   it needs the exact resource name, not a label selector.
+      #   `kubectl wait pod --for=condition=Ready --selector` is simpler and
+      #   works correctly for both Deployments and StatefulSets.
 
-      - name: Wait for Neo4j StatefulSet
+      - name: Wait for PostgreSQL pod
         run: |
-          echo "Waiting for Neo4j to become ready (up to 8 min — Neo4j needs time to initialise)..."
+          echo "Waiting for PostgreSQL pod to be Ready (up to 7 min)..."
+          echo "  (includes image pull ~300 MB + PostgreSQL initialisation)"
           kubectl -n ${{ env.NAMESPACE }} wait pod \
-            --selector "app.kubernetes.io/name=neo4j,app.kubernetes.io/instance=${{ env.RELEASE_NAME }}" \
+            -l "app.kubernetes.io/name=postgresql,app.kubernetes.io/instance=${{ env.RELEASE_NAME }}" \
             --for=condition=Ready \
-            --timeout=480s
+            --timeout=420s
+          echo "PostgreSQL is ready."
 
-      # ── Wait: application layer ───────────────────────────────────────────────
-      - name: Wait for backend Deployment
+      - name: Wait for Neo4j pod
         run: |
-          echo "Waiting for backend to become ready (up to 5 min — includes DB retry backoff)..."
-          kubectl -n ${{ env.NAMESPACE }} rollout status \
-            deployment/${{ env.RELEASE_NAME }}-backend \
+          echo "Waiting for Neo4j pod to be Ready (up to 10 min)..."
+          echo "  (includes image pull ~450 MB + Neo4j initialisation + bolt listener)"
+          kubectl -n ${{ env.NAMESPACE }} wait pod \
+            -l "app.kubernetes.io/name=neo4j,app.kubernetes.io/instance=${{ env.RELEASE_NAME }}" \
+            --for=condition=Ready \
+            --timeout=600s
+          echo "Neo4j is ready."
+
+      # ── Wait: application layer ────────────────────────────────────────────
+      - name: Wait for backend pod
+        run: |
+          echo "Waiting for backend pod to be Ready (up to 5 min)..."
+          echo "  (includes DB connectivity retry backoff)"
+          kubectl -n ${{ env.NAMESPACE }} wait pod \
+            -l "app.kubernetes.io/component=backend,app.kubernetes.io/instance=${{ env.RELEASE_NAME }}" \
+            --for=condition=Ready \
             --timeout=300s
+          echo "Backend is ready."
 
-      - name: Wait for UI Deployment
+      - name: Wait for UI pod
         run: |
-          kubectl -n ${{ env.NAMESPACE }} rollout status \
-            deployment/${{ env.RELEASE_NAME }}-ui \
+          kubectl -n ${{ env.NAMESPACE }} wait pod \
+            -l "app.kubernetes.io/component=ui,app.kubernetes.io/instance=${{ env.RELEASE_NAME }}" \
+            --for=condition=Ready \
             --timeout=120s
+          echo "UI is ready."
 
       # ── Fail-fast: catch CrashLoopBackOff / pull errors ───────────────────────
       - name: Check for failing pods
