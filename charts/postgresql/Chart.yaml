@@ -1,4 +1,0 @@
-apiVersion: v2
-name: postgresql
-version: 15.0.0
-description: Stub for helm dependency
