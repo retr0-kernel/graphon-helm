@@ -44,6 +44,50 @@ backend:
   # CORS allowed origins — comma-separated or "*"
   corsOrigins: "*"
 
+  # ── Phase 3: Deployment mode ──────────────────────────────────────────────
+  # "self-hosted" (default) or "cloud"
+  deploymentMode: "self-hosted"
+
+  # ── Phase 3: Licensing ────────────────────────────────────────────────────
+  license:
+    # License key (JWT issued by license.graphon.io). Leave empty for Free tier.
+    key: ""
+    # Validate against online revocation list every 24h (requires internet)
+    validationEnabled: false
+    # Days to continue operating after license expiry before downgrading to Free
+    gracePeriodDays: 14
+    # Reference an existing secret instead of putting the key inline:
+    # existingSecret: "graphon-license"
+    # existingSecretKey: "license-key"
+
+  # ── Phase 3: OIDC / SSO (disabled by default) ─────────────────────────────
+  oidc:
+    enabled: false
+    # issuerUrl: "https://accounts.google.com"
+    # clientId: ""
+    # clientSecret: ""            # use existingSecret in production
+    # redirectUrl: "https://graphon.example.com/auth/callback"
+    # scopes: "openid,email,profile,groups"
+    # sessionSecret: ""           # 32-char random string; auto-generated if empty
+    # existingSecret: "graphon-oidc-secret"
+
+  # ── Phase 3: RBAC (disabled by default) ───────────────────────────────────
+  rbac:
+    enabled: false
+    defaultRole: "viewer"
+
+  # ── Phase 3: GitHub App integration ──────────────────────────────────────
+  github:
+    enabled: false
+    # webhookSecret: ""           # use existingSecret in production
+
+  # ── Phase 3: GitLab App integration ──────────────────────────────────────
+  gitlab:
+    enabled: false
+    instanceUrl: "https://gitlab.com"
+    # webhookSecret: ""
+    # token: ""
+
   service:
     type: ClusterIP
     port: 8080

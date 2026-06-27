@@ -47,6 +47,52 @@ spec:
             - name: CORS_ORIGINS
               value: {{ .Values.backend.corsOrigins | quote }}
 
+            # ── Phase 3: Deployment mode ──────────────────────────────────
+            - name: DEPLOYMENT_MODE
+              value: {{ .Values.backend.deploymentMode | default "self-hosted" | quote }}
+
+            # ── Phase 3: Licensing ────────────────────────────────────────
+            {{- if .Values.backend.license.key }}
+            - name: GRAPHON_LICENSE_KEY
+              value: {{ .Values.backend.license.key | quote }}
+            {{- end }}
+            - name: LICENSE_GRACE_PERIOD_DAYS
+              value: {{ .Values.backend.license.gracePeriodDays | default 14 | quote }}
+            - name: LICENSE_VALIDATION_ENABLED
+              value: {{ .Values.backend.license.validationEnabled | default false | quote }}
+
+            # ── Phase 3: OIDC / SSO ───────────────────────────────────────
+            - name: OIDC_ENABLED
+              value: {{ .Values.backend.oidc.enabled | default false | quote }}
+            {{- if .Values.backend.oidc.enabled }}
+            - name: OIDC_ISSUER_URL
+              value: {{ .Values.backend.oidc.issuerUrl | default "" | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ .Values.backend.oidc.clientId | default "" | quote }}
+            - name: OIDC_REDIRECT_URL
+              value: {{ .Values.backend.oidc.redirectUrl | default "" | quote }}
+            - name: OIDC_SCOPES
+              value: {{ .Values.backend.oidc.scopes | default "openid,email,profile" | quote }}
+            {{- end }}
+
+            # ── Phase 3: RBAC ─────────────────────────────────────────────
+            - name: RBAC_ENABLED
+              value: {{ .Values.backend.rbac.enabled | default false | quote }}
+            - name: RBAC_DEFAULT_ROLE
+              value: {{ .Values.backend.rbac.defaultRole | default "viewer" | quote }}
+
+            # ── Phase 3: GitHub App ───────────────────────────────────────
+            - name: GITHUB_APP_ENABLED
+              value: {{ .Values.backend.github.enabled | default false | quote }}
+
+            # ── Phase 3: GitLab App ───────────────────────────────────────
+            - name: GITLAB_APP_ENABLED
+              value: {{ .Values.backend.gitlab.enabled | default false | quote }}
+            {{- if .Values.backend.gitlab.instanceUrl }}
+            - name: GITLAB_INSTANCE_URL
+              value: {{ .Values.backend.gitlab.instanceUrl | quote }}
+            {{- end }}
+
             # ── Neo4j ─────────────────────────────────────────────────────
             - name: NEO4J_URI
               value: {{ include "graphon.neo4jURI" . | quote }}
