@@ -73,6 +73,10 @@ spec:
               value: {{ .Values.backend.oidc.redirectUrl | default "" | quote }}
             - name: OIDC_SCOPES
               value: {{ .Values.backend.oidc.scopes | default "openid,email,profile" | quote }}
+            {{- if .Values.backend.oidc.groupRoleMapping }}
+            - name: OIDC_GROUP_ROLE_MAPPING
+              value: {{ .Values.backend.oidc.groupRoleMapping | quote }}
+            {{- end }}
             {{- end }}
 
             # ── Phase 3: RBAC ─────────────────────────────────────────────
@@ -84,6 +88,20 @@ spec:
             # ── Phase 3: GitHub App ───────────────────────────────────────
             - name: GITHUB_APP_ENABLED
               value: {{ .Values.backend.github.enabled | default false | quote }}
+            {{- if .Values.backend.github.webhookSecret }}
+            - name: GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "graphon.fullname" . }}-github
+                  key: webhook-secret
+            {{- end }}
+            {{- if .Values.backend.github.token }}
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "graphon.fullname" . }}-github
+                  key: token
+            {{- end }}
 
             # ── Phase 3: GitLab App ───────────────────────────────────────
             - name: GITLAB_APP_ENABLED
@@ -91,6 +109,20 @@ spec:
             {{- if .Values.backend.gitlab.instanceUrl }}
             - name: GITLAB_INSTANCE_URL
               value: {{ .Values.backend.gitlab.instanceUrl | quote }}
+            {{- end }}
+            {{- if .Values.backend.gitlab.webhookSecret }}
+            - name: GITLAB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "graphon.fullname" . }}-gitlab
+                  key: webhook-secret
+            {{- end }}
+            {{- if .Values.backend.gitlab.token }}
+            - name: GITLAB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "graphon.fullname" . }}-gitlab
+                  key: token
             {{- end }}
 
             # ── Neo4j ─────────────────────────────────────────────────────

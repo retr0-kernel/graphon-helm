@@ -12,7 +12,7 @@
 # A high-resource example is available in values-large-cluster.yaml.
 #
 # Full parameter reference:
-#   https://github.com/retr0-kernel/graphon-helm/blob/main/docs/kubernetes-installation.md
+#   https://github.com/retr0-kernel/graphon/blob/main/graphon-helm/docs/installation.md
 # ────────────────────────────────────────────────────────────────────────────
 
 # -- Global image settings shared across all components.
@@ -68,6 +68,7 @@ backend:
     # clientSecret: ""            # use existingSecret in production
     # redirectUrl: "https://graphon.example.com/auth/callback"
     # scopes: "openid,email,profile,groups"
+    # groupRoleMapping: "engineering:developer,ops:admin,security:admin"
     # sessionSecret: ""           # 32-char random string; auto-generated if empty
     # existingSecret: "graphon-oidc-secret"
 
@@ -79,14 +80,17 @@ backend:
   # ── Phase 3: GitHub App integration ──────────────────────────────────────
   github:
     enabled: false
-    # webhookSecret: ""           # use existingSecret in production
+    # webhookSecret: ""           # HMAC secret configured in GitHub webhook settings
+    # token: ""                   # PAT or GitHub App installation token (repo write scope)
+    # existingSecret: ""          # use a pre-existing k8s secret instead
 
   # ── Phase 3: GitLab App integration ──────────────────────────────────────
   gitlab:
     enabled: false
     instanceUrl: "https://gitlab.com"
-    # webhookSecret: ""
-    # token: ""
+    # webhookSecret: ""           # token configured in GitLab webhook settings
+    # token: ""                   # GitLab PAT with api scope for posting MR comments
+    # existingSecret: ""
 
   service:
     type: ClusterIP

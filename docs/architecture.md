@@ -148,6 +148,10 @@ agent:
 | `drift_baselines` | Dependency edge lifecycle tracking |
 | `review_items` | Governance review queue |
 | `slack_configs` | Slack webhook settings per tenant |
+| `clusters` | Registered clusters per tenant (multi-cluster support) |
+| `graph_snapshots` | Point-in-time snapshots of the dependency graph |
+| `users` | User accounts for OIDC-authenticated sessions |
+| `sessions` | Server-side session store for OIDC SSO |
 
 ## Node ID Scheme
 
@@ -160,3 +164,57 @@ All IDs are deterministic property-based strings — stable across restarts, upg
 | Namespace | `ns:{tenant_id}:{cluster_id}:{name}` |
 
 No Neo4j internal IDs are exposed in any API response.
+
+---
+
+## Enterprise Features
+
+The following features are enabled by a valid Enterprise license key.
+
+### OIDC SSO
+
+Graphon integrates with any OIDC provider. On login, an authorization code flow redirects the user to the identity provider. On callback, the backend exchanges the code for an ID token, creates a server-side session in PostgreSQL (`sessions` table), and issues a session cookie. Subsequent requests are authenticated via the cookie — no client-side token storage.
+
+Group-to-role mapping is configured via `oidc.groupRoleMapping`:
+
+```yaml
+oidc:
+  groupRoleMapping: "engineering:admin,readonly-group:viewer"
+```
+
+### RBAC
+
+When `backend.rbacEnabled: true`, every protected route is enforced by an in-process middleware that reads the role from the current session or API key. Roles: `admin`, `editor`, `viewer`. Permissions are additive and map to individual API routes.
+
+| Role | Can do |
+|---|---|
+| `admin` | Everything — clusters, graph, ownership, snapshots, license management |
+| `editor` | Read/write graph, ownership, snapshots; cannot manage license or RBAC |
+| `viewer` | Read-only access to graph, ownership, and snapshots |
+
+### Multi-Cluster
+
+Each cluster registers itself on startup via `POST /api/v1/clusters/register`. The backend records it in the `clusters` table with metadata (region, display name, last-seen). All graph queries are scoped by `cluster_id`.
+
+### Graph Snapshots
+
+The scheduler can capture periodic snapshots of the full Neo4j graph into PostgreSQL (`graph_snapshots` table). Snapshots can be triggered manually or on a cron schedule (when `snapshots.schedule` is set in values). Snapshots are exportable as JSON or CSV.
+
+### GitHub & GitLab Integration
+
+When a PR/MR webhook arrives, Graphon:
+1. Verifies the webhook signature (HMAC-SHA256 for GitHub, token header for GitLab)
+2. Passes changed file paths to the impact analyzer
+3. Queries the graph for services that own those files
+4. Computes downstream blast radius (who depends on the affected services)
+5. Posts a comment back to the PR/MR with the impact report
+
+Configure via:
+```yaml
+github:
+  webhookSecret: "..."
+  token: "ghp_..."        # for posting comments
+gitlab:
+  webhookSecret: "..."
+  token: "glpat-..."      # for posting notes
+```
