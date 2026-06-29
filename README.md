@@ -1,7 +1,7 @@
 # Graphon Helm Chart
 
-[![Helm Version](https://img.shields.io/badge/helm-v0.2.9-blue)](https://github.com/retr0-kernel/graphon-helm)
-[![App Version](https://img.shields.io/badge/app-v0.2.9-green)](https://github.com/retr0-kernel/graphon-helm)
+[![Helm Version](https://img.shields.io/badge/helm-v0.3.0-blue)](https://github.com/retr0-kernel/graphon-helm)
+[![App Version](https://img.shields.io/badge/app-v0.3.0-green)](https://github.com/retr0-kernel/graphon-helm)
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/graphon)](https://artifacthub.io/packages/search?repo=graphon)
 
 **Graphon** is a Runtime Dependency Intelligence & Governance Platform that uses eBPF to automatically map service dependencies in Kubernetes — no instrumentation, no sidecars, no code changes.
