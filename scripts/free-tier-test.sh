@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────────────────────
 # Graphon Free Tier — End-to-End Test Script
+# Runs every check, never exits early, dumps raw responses on failure.
 #
 # Usage:
 #   ./scripts/free-tier-test.sh
@@ -8,222 +8,208 @@
 # Prereqs:
 #   kubectl port-forward -n graphon svc/graphon-backend 8080:8080 &
 #   kubectl port-forward -n graphon svc/graphon-ui 3000:80 &
-#
-# Env overrides:
-#   BACKEND=http://localhost:8080   (default)
-#   TENANT_ID=default               (default — matches agent)
-#   CLUSTER_ID=<auto from kubectl>  (default — matches agent node name)
-# ─────────────────────────────────────────────────────────────────────────────
-set -euo pipefail
 
-# ── Colours ──────────────────────────────────────────────────────────────────
 GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
-
-ok()      { echo -e "  ${GREEN}✔${NC}  $1"; }
-fail()    { echo -e "  ${RED}✘${NC}  $1"; FAILURES=$((FAILURES+1)); }
-info()    { echo -e "  ${YELLOW}→${NC}  $1"; }
-section() { echo -e "\n${BOLD}${CYAN}══ $1 ══${NC}"; }
-result()  { local v; v=$(echo "$1" | jq -r "$2" 2>/dev/null); echo "$v"; }
+CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
 
 FAILURES=0
 BACKEND="${BACKEND:-http://localhost:8080}"
 TID="${TENANT_ID:-default}"
 CID="${CLUSTER_ID:-$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo 'default')}"
 
+ok()      { echo -e "  ${GREEN}✔${NC}  $*"; }
+fail()    { echo -e "  ${RED}✘${NC}  $*"; FAILURES=$((FAILURES+1)); }
+info()    { echo -e "  ${YELLOW}→${NC}  $*"; }
+dump()    { echo -e "${DIM}    raw: $*${NC}"; }
+section() { echo -e "\n${BOLD}${CYAN}══ $* ══${NC}"; }
+
+# curl wrapper: always returns body, never exits on HTTP error
+# Usage: raw=$(api GET /api/v1/health)
+api() {
+  local method="$1" path="$2"
+  shift 2
+  curl -s --max-time 10 -X "$method" \
+    -H "X-Tenant-ID: $TID" -H "X-Cluster-ID: $CID" \
+    "$@" "$BACKEND$path" 2>&1 || echo '{"_curl_error":true}'
+}
+
 echo -e "\n${BOLD}Graphon Free Tier — End-to-End Test${NC}"
 echo -e "Backend : ${CYAN}$BACKEND${NC}"
 echo -e "Tenant  : ${CYAN}$TID${NC}"
-echo -e "Cluster : ${CYAN}$CID${NC}"
+echo -e "Cluster : ${CYAN}$CID${NC}\n"
 
-# ─────────────────────────────────────────────────────────────────────────────
+echo -e "${DIM}kubectl pods:${NC}"
+kubectl get pods -n graphon --no-headers 2>/dev/null | sed 's/^/  /'
+echo ""
+
+# ─── 1. Health ────────────────────────────────────────────────────────────────
 section "1. Health"
-# ─────────────────────────────────────────────────────────────────────────────
 
-HEALTH=$(curl -sf "$BACKEND/api/v1/health" 2>/dev/null || echo '{}')
-STATUS=$(echo "$HEALTH" | jq -r '.status // "error"')
+HEALTH=$(curl -s --max-time 10 "$BACKEND/api/v1/health" 2>&1 || echo '{"_curl_error":true}')
+STATUS=$(echo "$HEALTH" | jq -r '.status // "error"' 2>/dev/null || echo "jq_error")
 if [ "$STATUS" = "ok" ]; then
   ok "Backend healthy  (status=$STATUS)"
 else
-  fail "Backend unhealthy  (got: $STATUS)"
+  fail "Backend unhealthy"
+  dump "$HEALTH"
+  echo ""
+  echo -e "${DIM}  backend pod logs (last 20 lines):${NC}"
+  kubectl logs -n graphon deploy/graphon-backend --tail=20 2>/dev/null | sed 's/^/    /'
 fi
 
-READY=$(curl -sf "$BACKEND/ready" 2>/dev/null || echo '{}')
-PG=$(echo "$READY" | jq -r '.postgres // "error"')
-NEO=$(echo "$READY" | jq -r '.neo4j // "error"')
-[ "$PG"  = "ok" ] && ok "PostgreSQL connected" || fail "PostgreSQL not ready (got: $PG)"
-[ "$NEO" = "ok" ] && ok "Neo4j connected"      || fail "Neo4j not ready (got: $NEO)"
+READY=$(curl -s --max-time 10 "$BACKEND/ready" 2>&1 || echo '{"_curl_error":true}')
+PG=$(echo  "$READY" | jq -r '.postgres // "error"' 2>/dev/null || echo "jq_error")
+NEO=$(echo "$READY" | jq -r '.neo4j    // "error"' 2>/dev/null || echo "jq_error")
+if [ "$PG" = "ok" ]; then
+  ok "PostgreSQL connected"
+else
+  fail "PostgreSQL not ready  (got: $PG)"
+  dump "$READY"
+  echo -e "${DIM}  postgresql pod logs (last 10 lines):${NC}"
+  kubectl logs -n graphon statefulset/graphon-postgresql --tail=10 2>/dev/null | sed 's/^/    /'
+fi
+if [ "$NEO" = "ok" ]; then
+  ok "Neo4j connected"
+else
+  fail "Neo4j not ready  (got: $NEO)"
+  dump "$READY"
+  echo -e "${DIM}  neo4j pod logs (last 10 lines):${NC}"
+  kubectl logs -n graphon statefulset/graphon --tail=10 2>/dev/null | sed 's/^/    /'
+fi
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── 2. Live Graph ────────────────────────────────────────────────────────────
 section "2. Live Graph"
-# ─────────────────────────────────────────────────────────────────────────────
 
-GRAPH=$(curl -sf \
-  -H "X-Tenant-ID: $TID" -H "X-Cluster-ID: $CID" \
-  "$BACKEND/api/v1/graph" 2>/dev/null || echo '{"nodes":[],"edges":[]}')
+GRAPH=$(api GET /api/v1/graph)
+NODE_COUNT=$(echo "$GRAPH" | jq '.nodes | length'         2>/dev/null || echo "0")
+EDGE_COUNT=$(echo "$GRAPH" | jq '.edges | length'         2>/dev/null || echo "0")
+NS_LIST=$(echo   "$GRAPH" | jq -r '[.nodes[].namespace] | unique | join(", ")' 2>/dev/null || echo "")
 
-NODE_COUNT=$(echo "$GRAPH" | jq '.nodes | length')
-EDGE_COUNT=$(echo "$GRAPH" | jq '.edges | length')
-NS_LIST=$(echo "$GRAPH" | jq -r '[.nodes[].namespace] | unique | join(", ")')
-
-if [ "$NODE_COUNT" -ge 1 ]; then
+if [ "${NODE_COUNT:-0}" -ge 1 ] 2>/dev/null; then
   ok "Graph has data  (nodes=$NODE_COUNT  edges=$EDGE_COUNT)"
   info "Namespaces: $NS_LIST"
+  EDGES=$(echo "$GRAPH" | jq -r '[.edges[] | "\(.source) → \(.target)"] | join("\n  ")' 2>/dev/null || echo "")
+  echo -e "  ${DIM}edges:\n  $EDGES${NC}"
 else
-  fail "Graph is empty — wait 2 min for eBPF to capture traffic, then retry"
+  fail "Graph is empty  (nodes=$NODE_COUNT)"
+  dump "$(echo "$GRAPH" | jq '{error:.error, nodes_len:(.nodes|length), edges_len:(.edges|length)}' 2>/dev/null || echo "$GRAPH")"
+  echo ""
+  echo -e "${DIM}  agent logs (last 20 lines — look for 'ingest' or 'event'):${NC}"
+  kubectl logs -n graphon daemonset/graphon-agent --tail=20 2>/dev/null | sed 's/^/    /'
 fi
 
-# Namespace filter test
-FILTERED=$(curl -sf \
-  -H "X-Tenant-ID: $TID" -H "X-Cluster-ID: $CID" \
-  "$BACKEND/api/v1/graph?namespace=demo-api" 2>/dev/null || echo '{"nodes":[]}')
-FILTERED_COUNT=$(echo "$FILTERED" | jq '.nodes | length')
-if [ "$FILTERED_COUNT" -ge 1 ]; then
-  ok "Namespace filter works  (demo-api nodes=$FILTERED_COUNT)"
+FILTERED=$(api GET "/api/v1/graph?namespace=demo-api")
+FC=$(echo "$FILTERED" | jq '.nodes | length' 2>/dev/null || echo "0")
+if [ "${FC:-0}" -ge 1 ] 2>/dev/null; then
+  ok "Namespace filter works  (demo-api nodes=$FC)"
 else
-  info "Namespace filter returned 0 nodes — demo-api may not be deployed yet"
+  info "Namespace filter: 0 nodes in demo-api — demo app may still be deploying"
+  echo -e "${DIM}  demo-api pods:${NC}"
+  kubectl get pods -n demo-api --no-headers 2>/dev/null | sed 's/^/    /' || echo "    (namespace not found)"
 fi
 
-# Cross-namespace edges
-EDGES=$(echo "$GRAPH" | jq -r '[.edges[] | "\(.source) → \(.target)"] | join(", ")')
-info "Edges: $EDGES"
-
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── 3. Ownership ─────────────────────────────────────────────────────────────
 section "3. Ownership"
-# ─────────────────────────────────────────────────────────────────────────────
 
-OWNERSHIP=$(curl -sf \
-  -H "X-Tenant-ID: $TID" -H "X-Cluster-ID: $CID" \
-  "$BACKEND/api/v1/ownership" 2>/dev/null || echo '[]')
-OWN_COUNT=$(echo "$OWNERSHIP" | jq 'length')
-if [ "$OWN_COUNT" -ge 1 ]; then
-  ok "Ownership records found  (count=$OWN_COUNT)"
-  echo "$OWNERSHIP" | jq -r '.[] | "     \(.node_id)  →  \(.team // "unowned")"' | head -7
+OWN=$(api GET /api/v1/ownership)
+OWN_COUNT=$(echo "$OWN" | jq 'if type=="array" then length else 0 end' 2>/dev/null || echo "0")
+if [ "${OWN_COUNT:-0}" -ge 1 ] 2>/dev/null; then
+  ok "Ownership records  (count=$OWN_COUNT)"
+  echo "$OWN" | jq -r '.[] | "    \(.node_id // "?")  →  \(.team // "unowned")"' 2>/dev/null | head -10
 else
-  fail "No ownership records  (are pods labelled with app.graphon.io/owner-team?)"
+  fail "No ownership records"
+  dump "$OWN"
 fi
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── 4. Safe-Delete ───────────────────────────────────────────────────────────
 section "4. Safe-Delete Analysis"
-# ─────────────────────────────────────────────────────────────────────────────
 
-# Test a hub service — should NOT be safe to delete
-GATEWAY_SD=$(curl -sf \
-  -H "X-Tenant-ID: $TID" -H "X-Cluster-ID: $CID" \
-  "$BACKEND/api/v1/services/gateway/safe-delete" 2>/dev/null || echo '{"safe":null}')
-GW_SAFE=$(echo "$GATEWAY_SD" | jq -r '.safe // "null"')
-GW_DEP=$(echo "$GATEWAY_SD"  | jq -r '.inbound_count // 0')
+GW=$(api GET /api/v1/services/gateway/safe-delete)
+GW_SAFE=$(echo "$GW" | jq -r '.safe // "null"' 2>/dev/null || echo "null")
+if   [ "$GW_SAFE" = "false" ]; then ok "gateway blocked  (inbound=$(echo "$GW" | jq -r '.inbound_count // 0' 2>/dev/null))"
+elif [ "$GW_SAFE" = "null"  ]; then info "gateway not in graph yet"
+else fail "gateway: expected safe=false, got safe=$GW_SAFE"; dump "$GW"; fi
 
-if [ "$GW_SAFE" = "false" ]; then
-  ok "gateway: correctly blocked  (inbound_count=$GW_DEP)"
-elif [ "$GW_SAFE" = "null" ]; then
-  info "gateway: service not in graph yet"
-else
-  fail "gateway: expected safe=false, got safe=$GW_SAFE"
-fi
+PM=$(api GET /api/v1/services/payments/safe-delete)
+PM_SAFE=$(echo "$PM" | jq -r '.safe // "null"' 2>/dev/null || echo "null")
+if   [ "$PM_SAFE" = "true" ]; then ok "payments safe  (no inbound deps)"
+elif [ "$PM_SAFE" = "null" ]; then info "payments not in graph yet"
+else fail "payments: expected safe=true, got safe=$PM_SAFE"; dump "$PM"; fi
 
-# Test a leaf service — should be safe to delete
-PAYMENTS_SD=$(curl -sf \
-  -H "X-Tenant-ID: $TID" -H "X-Cluster-ID: $CID" \
-  "$BACKEND/api/v1/services/payments/safe-delete" 2>/dev/null || echo '{"safe":null}')
-PM_SAFE=$(echo "$PAYMENTS_SD" | jq -r '.safe // "null"')
-if [ "$PM_SAFE" = "true" ]; then
-  ok "payments: correctly marked safe (no inbound dependencies)"
-elif [ "$PM_SAFE" = "null" ]; then
-  info "payments: service not in graph yet"
-else
-  fail "payments: expected safe=true, got safe=$PM_SAFE"
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── 5. Snapshots ─────────────────────────────────────────────────────────────
 section "5. Snapshots"
-# ─────────────────────────────────────────────────────────────────────────────
 
-SNAP_RESP=$(curl -sf -X POST \
-  -H "X-Tenant-ID: $TID" -H "X-Cluster-ID: $CID" \
-  -H "Content-Type: application/json" \
-  -d '{"label":"ci-test","trigger":"manual"}' \
-  "$BACKEND/api/v1/snapshots" 2>/dev/null || echo '{}')
-
-SNAP_ID=$(echo "$SNAP_RESP" | jq -r '.id // ""')
+SNAP_RESP=$(api POST /api/v1/snapshots -H "Content-Type: application/json" -d '{"label":"ci-test","trigger":"manual"}')
+SNAP_ID=$(echo "$SNAP_RESP" | jq -r '.id // ""' 2>/dev/null || echo "")
 if [ ${#SNAP_ID} -gt 10 ]; then
   ok "Snapshot created  (id=$SNAP_ID)"
 else
-  ERROR=$(echo "$SNAP_RESP" | jq -r '.error // "unknown"')
-  fail "Snapshot failed  ($ERROR)"
+  fail "Snapshot failed"
+  dump "$SNAP_RESP"
+  echo -e "${DIM}  backend logs around snapshot:${NC}"
+  kubectl logs -n graphon deploy/graphon-backend --tail=30 2>/dev/null | grep -i "snapshot\|error" | tail -10 | sed 's/^/    /'
 fi
 
-# List snapshots
-SNAP_LIST=$(curl -sf \
-  -H "X-Tenant-ID: $TID" -H "X-Cluster-ID: $CID" \
-  "$BACKEND/api/v1/snapshots" 2>/dev/null || echo '{"snapshots":[]}')
-SNAP_LIST_COUNT=$(echo "$SNAP_LIST" | jq '.snapshots | length')
-[ "$SNAP_LIST_COUNT" -ge 1 ] && ok "Snapshot list works  (count=$SNAP_LIST_COUNT)" || fail "Snapshot list empty"
+SNAP_LIST=$(api GET /api/v1/snapshots)
+SL=$(echo "$SNAP_LIST" | jq '.snapshots | length' 2>/dev/null || echo "0")
+if [ "${SL:-0}" -ge 1 ] 2>/dev/null; then ok "Snapshot list works  (count=$SL)"
+else fail "Snapshot list empty"; dump "$SNAP_LIST"; fi
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── 6. Search ────────────────────────────────────────────────────────────────
 section "6. Search"
-# ─────────────────────────────────────────────────────────────────────────────
 
-SEARCH=$(curl -sf \
-  -H "X-Tenant-ID: $TID" -H "X-Cluster-ID: $CID" \
-  "$BACKEND/api/v1/search?q=orders" 2>/dev/null || echo '{"results":[]}')
-S_COUNT=$(echo "$SEARCH" | jq '.results | length // 0')
-if [ "$S_COUNT" -ge 1 ]; then
-  ok "Search works  (results=$S_COUNT for q=orders)"
-else
-  info "Search returned 0 results — graph may still be empty"
-fi
+SEARCH=$(api GET "/api/v1/search?q=orders")
+SC=$(echo "$SEARCH" | jq '.results | length' 2>/dev/null || echo "0")
+if [ "${SC:-0}" -ge 1 ] 2>/dev/null; then ok "Search works  (results=$SC)"
+else info "Search: 0 results — graph may be empty"
+  dump "$SEARCH"; fi
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── 7. Export ────────────────────────────────────────────────────────────────
 section "7. Export"
-# ─────────────────────────────────────────────────────────────────────────────
 
-MERMAID=$(curl -sf -X POST \
-  -H "X-Tenant-ID: $TID" -H "X-Cluster-ID: $CID" \
-  -H "Content-Type: application/json" -d '{"format":"mermaid"}' \
-  "$BACKEND/api/v1/export" 2>/dev/null || echo '')
-
-if echo "$MERMAID" | grep -q "flowchart"; then
-  LINES=$(echo "$MERMAID" | wc -l | tr -d ' ')
-  ok "Mermaid export works  ($LINES lines)"
-  echo "$MERMAID" | head -5 | sed 's/^/     /'
+MERMAID=$(api POST /api/v1/export -H "Content-Type: application/json" -d '{"format":"mermaid"}')
+if echo "$MERMAID" | grep -q "flowchart" 2>/dev/null; then
+  ok "Mermaid export  ($(echo "$MERMAID" | wc -l | tr -d ' ') lines)"
+  echo "$MERMAID" | head -6 | sed 's/^/    /'
 else
-  fail "Mermaid export failed or returned empty"
+  fail "Mermaid export failed"
+  dump "$MERMAID"
 fi
 
-DOT=$(curl -sf -X POST \
-  -H "X-Tenant-ID: $TID" -H "X-Cluster-ID: $CID" \
-  -H "Content-Type: application/json" -d '{"format":"dot"}' \
-  "$BACKEND/api/v1/export" 2>/dev/null || echo '')
+DOT=$(api POST /api/v1/export -H "Content-Type: application/json" -d '{"format":"dot"}')
+if echo "$DOT" | grep -q "digraph" 2>/dev/null; then ok "DOT export works"
+else fail "DOT export failed"; dump "$DOT"; fi
 
-echo "$DOT" | grep -q "digraph" && ok "DOT export works" || fail "DOT export failed"
+# ─── 8. License ───────────────────────────────────────────────────────────────
+section "8. License"
 
-# ─────────────────────────────────────────────────────────────────────────────
-section "8. License Status"
-# ─────────────────────────────────────────────────────────────────────────────
+LIC=$(curl -s --max-time 10 -H "X-Tenant-ID: $TID" "$BACKEND/api/v1/license" 2>&1 || echo '{}')
+PLAN=$(echo "$LIC" | jq -r '.plan // "unknown"' 2>/dev/null || echo "unknown")
+RET=$(echo  "$LIC" | jq -r '.limits.retention_days // "?"' 2>/dev/null || echo "?")
+ok "License: plan=$PLAN  retention=${RET}d"
+dump "$LIC"
 
-LICENSE=$(curl -sf \
-  -H "X-Tenant-ID: $TID" \
-  "$BACKEND/api/v1/license" 2>/dev/null || echo '{}')
-PLAN=$(echo "$LICENSE" | jq -r '.plan // "unknown"')
-RETENTION=$(echo "$LICENSE" | jq -r '.limits.retention_days // "?"')
-ok "License: plan=$PLAN  retention=${RETENTION}d"
-
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── 9. UI ────────────────────────────────────────────────────────────────────
 section "9. UI Reachability"
-# ─────────────────────────────────────────────────────────────────────────────
 
-UI_CODE=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null || echo '000')
-[ "$UI_CODE" = "200" ] && ok "UI reachable  (HTTP $UI_CODE)" || fail "UI unreachable  (HTTP $UI_CODE — port-forward running?)"
+UI_CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null || echo '000')
+if [ "$UI_CODE" = "200" ]; then ok "UI reachable  (HTTP $UI_CODE)"
+else
+  fail "UI unreachable  (HTTP $UI_CODE)"
+  echo -e "${DIM}  UI pod status:${NC}"
+  kubectl get pod -n graphon -l app.kubernetes.io/name=graphon-ui --no-headers 2>/dev/null | sed 's/^/    /'
+  kubectl logs -n graphon deploy/graphon-ui --tail=10 2>/dev/null | sed 's/^/    /'
+fi
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Summary
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── Summary ──────────────────────────────────────────────────────────────────
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
   echo -e "${GREEN}${BOLD}All checks passed — ready for demo ✔${NC}"
   exit 0
 else
   echo -e "${RED}${BOLD}$FAILURES check(s) FAILED${NC}"
+  echo ""
+  echo -e "${DIM}Full backend logs (last 50 lines):${NC}"
+  kubectl logs -n graphon deploy/graphon-backend --tail=50 2>/dev/null | sed 's/^/  /'
   exit 1
 fi
