@@ -1,175 +1,128 @@
-# Graphon Live Demo — Master Guide
+# Graphon Live Demo — From Absolute Zero
 
-**Version:** v0.3.0  
-**Audience:** Demo presenter / sales engineer  
-**Total setup time:** ~12 minutes  
-**Demo runtime:** 20–40 minutes depending on tier
+**Assumes:** `kubectl` works and is pointed at the target cluster. That's it.
 
 ---
 
-## What This Demo Proves
-
-Graphon answers questions that no existing tool does in real time:
-
-| Question | How the demo shows it |
-|---|---|
-| "What does my service actually call?" | Live graph auto-populated from eBPF — no instrumentation |
-| "If I delete X, what breaks?" | Safe-delete analysis with inbound dependency count |
-| "Did the architecture drift from our baseline?" | Drift detection with review items |
-| "Who owns this orphaned service?" | Ownership map with team/email/Slack |
-| "What did the graph look like last Tuesday?" | Snapshot history + diff |
-| "Which team shipped the unexpected dependency?" | RBAC-scoped view per team (Enterprise) |
-
----
-
-## Why Multi-Namespace Matters
-
-The original demo app puts all services in one namespace (`graphon-demo`). That works but it undersells Graphon's core value: **detecting dependencies that cross team boundaries**.
-
-The new demo uses three namespaces that mirror a real company:
-
-```
-demo-web    →  frontend, gateway          (frontend-team)
-demo-api    →  orders, payments, catalog  (orders-team, payments-team, catalog-team)
-demo-data   →  notifications, user-service (platform-team)
-```
-
-**Cross-namespace connections the eBPF agent will discover automatically:**
-
-```
-frontend (demo-web)    → gateway (demo-web)          # same namespace
-gateway  (demo-web)    → orders (demo-api)            # CROSS-NAMESPACE ← demo moment
-gateway  (demo-web)    → catalog (demo-api)           # CROSS-NAMESPACE
-gateway  (demo-web)    → user-service (demo-data)     # CROSS-NAMESPACE
-orders   (demo-api)    → payments (demo-api)          # same namespace
-orders   (demo-api)    → notifications (demo-data)    # CROSS-NAMESPACE ← demo moment
-```
-
-This lets you show the namespace filter in the UI and demonstrate that Graphon sees through
-namespace boundaries without any network policy changes or service mesh configuration.
-
----
-
-## Demo Architecture
-
-```
-┌─────────────────── Kind Cluster ──────────────────────────┐
-│                                                            │
-│  namespace: graphon                                        │
-│  ┌──────────────────────────────────────────────────────┐ │
-│  │ graphon-backend (:8080)  graphon-ui (:80)            │ │
-│  │ graphon-bpf (DaemonSet)  postgres  neo4j             │ │
-│  └──────────────────────────────────────────────────────┘ │
-│            ↑ captures TCP from all namespaces              │
-│                                                            │
-│  namespace: demo-web         namespace: demo-api           │
-│  ┌─────────────────────┐    ┌──────────────────────────┐  │
-│  │ frontend   :80      │    │ orders      :80          │  │
-│  │ gateway    :80      │───▶│ payments    :80          │  │
-│  │ traffic-gen         │    │ catalog     :80          │  │
-│  └─────────────────────┘    └──────────────────────────┘  │
-│                    │                                        │
-│                    ▼         namespace: demo-data           │
-│              ┌──────────────────────────────────────────┐  │
-│              │ notifications  :80                       │  │
-│              │ user-service   :80                       │  │
-│              └──────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Quick Setup (Run Once Before Demo)
+## Step 0 — Install prerequisites (if missing)
 
 ```bash
-# 1. Create cluster
-kind create cluster --name graphon-demo
+# Helm (if not installed)
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-# 2. Install Graphon
-cd graphon-helm/
-helm install graphon . \
-  --namespace graphon --create-namespace \
+# Git (if not installed — usually present)
+git --version || brew install git   # macOS
+# git --version || apt-get install -y git  # Ubuntu/Debian
+```
+
+Confirm cluster access:
+```bash
+kubectl get nodes
+kubectl get ns
+```
+
+---
+
+## Step 1 — Clone the repo
+
+```bash
+git clone https://github.com/retr0-kernel/graphon-helm.git
+cd graphon-helm
+```
+
+---
+
+## Step 2 — Install Graphon
+
+Pick a namespace. If a `demos` or `graphon` namespace already exists, use it. Otherwise create one:
+
+```bash
+kubectl create namespace graphon   # skip if namespace already exists
+
+helm upgrade --install graphon . \
+  --namespace graphon \
   --set backend.authDisabled=true \
   --wait --timeout 5m
+```
 
-# 3. Deploy multi-namespace demo app
+Watch pods come up:
+```bash
+kubectl get pods -n graphon -w
+```
+
+All pods should reach `Running` within 3–5 minutes.
+
+---
+
+## Step 3 — Deploy the multi-namespace demo app
+
+```bash
 kubectl apply -f examples/demo-app-multi-ns/namespaces.yaml
 kubectl apply -f examples/demo-app-multi-ns/services.yaml
 kubectl apply -f examples/demo-app-multi-ns/traffic-generator.yaml
 
-# 4. Wait for traffic to generate (2 minutes)
-sleep 120
-
-# 5. Port-forward
-kubectl port-forward -n graphon svc/graphon-backend 8080:8080 &
-kubectl port-forward -n graphon svc/graphon-ui 3000:80 &
-
-# 6. Open UI
-open http://localhost:3000
+# Wait for pods
+kubectl wait --for=condition=Ready pods --all -n demo-web --timeout=120s
+kubectl wait --for=condition=Ready pods --all -n demo-api --timeout=120s
+kubectl wait --for=condition=Ready pods --all -n demo-data --timeout=120s
 ```
 
-After step 4, Graphon will have discovered all 7 services and 6 cross-namespace connections.
+This deploys 7 services across 3 namespaces and a traffic generator that starts making cross-namespace TCP connections immediately.
+
+```
+demo-web   →  frontend, gateway
+demo-api   →  orders, payments, catalog
+demo-data  →  notifications, user-service
+```
 
 ---
 
-## Demo Scripts Per Tier
-
-| Tier | Document | What it covers |
-|---|---|---|
-| **Free Self-Hosted** | [FREE_TIER_DEMO.md](./FREE_TIER_DEMO.md) | Graph, ownership, drift detection, safe-delete, snapshots, search, export |
-| **Enterprise Self-Hosted** | [ENTERPRISE_TIER_DEMO.md](./ENTERPRISE_TIER_DEMO.md) | License key, RBAC, OIDC/SSO, scheduled snapshots, webhooks, Draw.io export, multi-cluster |
-
----
-
-## Namespace Filter: The Killer Demo Moment
-
-When you have the graph open on screen, filter to one namespace:
+## Step 4 — Wait for eBPF to capture traffic
 
 ```bash
-# See only demo-api services
-curl -s \
-  -H "X-Tenant-ID: default" \
-  -H "X-Cluster-ID: default" \
-  "http://localhost:8080/api/v1/graph?namespace=demo-api" | jq '{
-    nodes: (.nodes | length),
-    services: [.nodes[].id]
-  }'
+sleep 120
+```
+
+The eBPF agent needs ~2 minutes to see enough TCP connections to build the graph.
+
+---
+
+## Step 5 — Port-forward and open the UI
+
+```bash
+kubectl port-forward -n graphon svc/graphon-backend 8080:8080 &
+kubectl port-forward -n graphon svc/graphon-ui 3000:80 &
+```
+
+Open: **http://localhost:3000**
+
+Quick sanity check:
+```bash
+curl -s http://localhost:8080/api/v1/health | jq .
+curl -s http://localhost:8080/ready | jq .
 ```
 
 Expected:
 ```json
-{
-  "nodes": 3,
-  "services": ["orders", "payments", "catalog"]
-}
+{"status":"ok","version":"0.3.0"}
+{"postgres":"ok","neo4j":"ok"}
 ```
 
-Then remove the filter to show the full cross-namespace picture — this is the moment that
-resonates with platform engineers who have hundreds of services across tens of namespaces.
-
 ---
 
-## Timing Guide (20-min demo)
+## Now run the tier demo
 
-| Time | What you do |
+| Tier | Doc |
 |---|---|
-| 0:00 | Health check, show all pods running |
-| 1:00 | Open UI, show live graph with all 3 namespaces colour-coded |
-| 3:00 | Namespace filter — show demo-api only, then full picture |
-| 5:00 | Click a service — show ownership (team, contact, Slack) |
-| 7:00 | Safe-delete analysis on `gateway` — show dependents |
-| 9:00 | Take a snapshot, scale down `notifications`, take second snapshot, show diff |
-| 13:00 | Seed drift baselines, introduce unexpected pod, show drift alert |
-| 16:00 | Export as Mermaid — paste into mermaid.live |
-| 18:00 | Q&A |
-
-For Enterprise demos (40 min), follow the FREE_TIER_DEMO first then continue with ENTERPRISE_TIER_DEMO.
+| **Free** | [FREE_TIER_DEMO.md](./FREE_TIER_DEMO.md) |
+| **Enterprise** | [ENTERPRISE_TIER_DEMO.md](./ENTERPRISE_TIER_DEMO.md) |
 
 ---
 
-## Cleanup
+## Cleanup when done
 
 ```bash
 kubectl delete -f examples/demo-app-multi-ns/
-kind delete cluster --name graphon-demo
+helm uninstall graphon -n graphon
+kubectl delete namespace graphon demo-web demo-api demo-data
 ```

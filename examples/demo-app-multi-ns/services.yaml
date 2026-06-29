@@ -1,22 +1,19 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Graphon Multi-Namespace Demo — Services
 #
-# Traffic topology (what the demo will reveal in Graphon):
-#
-#   [demo-web]  frontend → gateway
-#   [demo-web → demo-api]  gateway → orders, catalog
-#   [demo-api]  orders → payments
-#   [demo-api → demo-data] orders → notifications
-#   [demo-web → demo-data] gateway → user-service
-#
-# All pods run nginx:alpine. Ownership labels are set on each pod so
-# Graphon auto-discovers team assignments on first ingest.
+# Traffic topology:
+#   [demo-web]              frontend → gateway
+#   [demo-web → demo-api]   gateway → orders, catalog
+#   [demo-api]              orders → payments
+#   [demo-api → demo-data]  orders → notifications
+#   [demo-web → demo-data]  gateway → user-service
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ════════════════════════════════════════════════════════════════
-# NAMESPACE: demo-web  (frontend-team owns this layer)
+# NAMESPACE: demo-web
 # ════════════════════════════════════════════════════════════════
 
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -45,9 +42,10 @@ spec:
         app: frontend
         app.kubernetes.io/name: frontend
         app.graphon.io/owner-team: frontend-team
-        app.graphon.io/owner-email: frontend@demo.io
-        app.graphon.io/owner-slack: "#frontend"
         app.graphon.io/service-type: web
+      annotations:
+        app.graphon.io/owner-email: frontend@demo.io
+        app.graphon.io/owner-slack: frontend
     spec:
       containers:
         - name: frontend
@@ -83,9 +81,10 @@ spec:
         app: gateway
         app.kubernetes.io/name: gateway
         app.graphon.io/owner-team: platform-team
-        app.graphon.io/owner-email: platform@demo.io
-        app.graphon.io/owner-slack: "#platform"
         app.graphon.io/service-type: gateway
+      annotations:
+        app.graphon.io/owner-email: platform@demo.io
+        app.graphon.io/owner-slack: platform
     spec:
       containers:
         - name: gateway
@@ -106,11 +105,11 @@ spec:
   selector: { app: gateway }
   ports: [{ port: 80, targetPort: 80 }]
 
-
 # ════════════════════════════════════════════════════════════════
-# NAMESPACE: demo-api  (orders-team, payments-team, catalog-team)
+# NAMESPACE: demo-api
 # ════════════════════════════════════════════════════════════════
 
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -139,9 +138,10 @@ spec:
         app: orders
         app.kubernetes.io/name: orders
         app.graphon.io/owner-team: orders-team
-        app.graphon.io/owner-email: orders@demo.io
-        app.graphon.io/owner-slack: "#orders"
         app.graphon.io/service-type: api
+      annotations:
+        app.graphon.io/owner-email: orders@demo.io
+        app.graphon.io/owner-slack: orders
     spec:
       containers:
         - name: orders
@@ -177,9 +177,10 @@ spec:
         app: payments
         app.kubernetes.io/name: payments
         app.graphon.io/owner-team: payments-team
-        app.graphon.io/owner-email: payments@demo.io
-        app.graphon.io/owner-slack: "#payments"
         app.graphon.io/service-type: api
+      annotations:
+        app.graphon.io/owner-email: payments@demo.io
+        app.graphon.io/owner-slack: payments
     spec:
       containers:
         - name: payments
@@ -215,9 +216,10 @@ spec:
         app: catalog
         app.kubernetes.io/name: catalog
         app.graphon.io/owner-team: catalog-team
-        app.graphon.io/owner-email: catalog@demo.io
-        app.graphon.io/owner-slack: "#catalog"
         app.graphon.io/service-type: api
+      annotations:
+        app.graphon.io/owner-email: catalog@demo.io
+        app.graphon.io/owner-slack: catalog
     spec:
       containers:
         - name: catalog
@@ -238,11 +240,11 @@ spec:
   selector: { app: catalog }
   ports: [{ port: 80, targetPort: 80 }]
 
-
 # ════════════════════════════════════════════════════════════════
-# NAMESPACE: demo-data  (platform-team owns shared data services)
+# NAMESPACE: demo-data
 # ════════════════════════════════════════════════════════════════
 
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -271,9 +273,10 @@ spec:
         app: notifications
         app.kubernetes.io/name: notifications
         app.graphon.io/owner-team: platform-team
-        app.graphon.io/owner-email: platform@demo.io
-        app.graphon.io/owner-slack: "#platform"
         app.graphon.io/service-type: messaging
+      annotations:
+        app.graphon.io/owner-email: platform@demo.io
+        app.graphon.io/owner-slack: platform
     spec:
       containers:
         - name: notifications
@@ -309,9 +312,10 @@ spec:
         app: user-service
         app.kubernetes.io/name: user-service
         app.graphon.io/owner-team: platform-team
-        app.graphon.io/owner-email: platform@demo.io
-        app.graphon.io/owner-slack: "#platform"
         app.graphon.io/service-type: api
+      annotations:
+        app.graphon.io/owner-email: platform@demo.io
+        app.graphon.io/owner-slack: platform
     spec:
       containers:
         - name: user-service
