@@ -58,8 +58,9 @@ else
 fi
 
 READY=$(curl -s --max-time 10 "$BACKEND/ready" 2>&1 || echo '{"_curl_error":true}')
-PG=$(echo  "$READY" | jq -r '.postgres // "error"' 2>/dev/null || echo "jq_error")
-NEO=$(echo "$READY" | jq -r '.neo4j    // "error"' 2>/dev/null || echo "jq_error")
+# /ready returns {"checks":{"neo4j":{"ok":true},"postgres":{"ok":true}},"ready":true}
+PG=$(echo  "$READY" | jq -r '(.checks.postgres.ok // .postgres // false) | if . == true then "ok" else "error" end' 2>/dev/null || echo "jq_error")
+NEO=$(echo "$READY" | jq -r '(.checks.neo4j.ok    // .neo4j    // false) | if . == true then "ok" else "error" end' 2>/dev/null || echo "jq_error")
 if [ "$PG" = "ok" ]; then
   ok "PostgreSQL connected"
 else
@@ -168,7 +169,7 @@ else info "Search: 0 results — graph may be empty"
 section "7. Export"
 
 MERMAID=$(api POST /api/v1/export -H "Content-Type: application/json" -d '{"format":"mermaid"}')
-if echo "$MERMAID" | grep -q "flowchart" 2>/dev/null; then
+if echo "$MERMAID" | grep -qE "flowchart|graph LR|graph TD" 2>/dev/null; then
   ok "Mermaid export  ($(echo "$MERMAID" | wc -l | tr -d ' ') lines)"
   echo "$MERMAID" | head -6 | sed 's/^/    /'
 else
