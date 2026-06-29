@@ -1,0 +1,66 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Graphon Demo — Traffic Generator
+#
+# Runs in demo-web namespace. Generates a realistic traffic pattern across all
+# three namespaces so Graphon's eBPF agent has connections to capture.
+#
+# Traffic pattern produced (matches the topology in services.yaml):
+#   frontend  → gateway                    (demo-web internal)
+#   gateway   → orders                     (demo-web → demo-api, cross-ns)
+#   gateway   → catalog                    (demo-web → demo-api, cross-ns)
+#   gateway   → user-service               (demo-web → demo-data, cross-ns)
+#   orders    → payments                   (demo-api internal)
+#   orders    → notifications              (demo-api → demo-data, cross-ns)
+#
+# The generator runs each call in a tight loop with a small sleep so the graph
+# populates within 60 seconds of deployment.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traffic-generator
+  namespace: demo-web
+  labels:
+    app: traffic-generator
+    app.graphon.io/owner-team: platform-team
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: traffic-generator }
+  template:
+    metadata:
+      labels:
+        app: traffic-generator
+        app.graphon.io/owner-team: platform-team
+    spec:
+      containers:
+        - name: gen
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Traffic generator starting..."
+              while true; do
+                # demo-web internal
+                wget -q -O /dev/null http://frontend.demo-web.svc.cluster.local/health 2>/dev/null
+                wget -q -O /dev/null http://gateway.demo-web.svc.cluster.local/health 2>/dev/null
+
+                # demo-web → demo-api (cross-namespace)
+                wget -q -O /dev/null http://orders.demo-api.svc.cluster.local/health 2>/dev/null
+                wget -q -O /dev/null http://catalog.demo-api.svc.cluster.local/health 2>/dev/null
+
+                # demo-api internal
+                wget -q -O /dev/null http://payments.demo-api.svc.cluster.local/health 2>/dev/null
+
+                # demo-api → demo-data (cross-namespace)
+                wget -q -O /dev/null http://notifications.demo-data.svc.cluster.local/health 2>/dev/null
+
+                # demo-web → demo-data (cross-namespace)
+                wget -q -O /dev/null http://user-service.demo-data.svc.cluster.local/health 2>/dev/null
+
+                sleep 2
+              done
+          resources:
+            requests: { cpu: 5m, memory: 8Mi }
+            limits:   { cpu: 20m, memory: 32Mi }

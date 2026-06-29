@@ -1,0 +1,333 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Graphon Multi-Namespace Demo — Services
+#
+# Traffic topology (what the demo will reveal in Graphon):
+#
+#   [demo-web]  frontend → gateway
+#   [demo-web → demo-api]  gateway → orders, catalog
+#   [demo-api]  orders → payments
+#   [demo-api → demo-data] orders → notifications
+#   [demo-web → demo-data] gateway → user-service
+#
+# All pods run nginx:alpine. Ownership labels are set on each pod so
+# Graphon auto-discovers team assignments on first ingest.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ════════════════════════════════════════════════════════════════
+# NAMESPACE: demo-web  (frontend-team owns this layer)
+# ════════════════════════════════════════════════════════════════
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-stub
+  namespace: demo-web
+data:
+  default.conf: |
+    server {
+      listen 80;
+      location /health { return 200 "ok\n"; }
+      location /       { return 200 "stub\n"; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: demo-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: frontend }
+  template:
+    metadata:
+      labels:
+        app: frontend
+        app.kubernetes.io/name: frontend
+        app.graphon.io/owner-team: frontend-team
+        app.graphon.io/owner-email: frontend@demo.io
+        app.graphon.io/owner-slack: "#frontend"
+        app.graphon.io/service-type: web
+    spec:
+      containers:
+        - name: frontend
+          image: nginx:1.27-alpine
+          ports: [{ containerPort: 80 }]
+          volumeMounts: [{ name: cfg, mountPath: /etc/nginx/conf.d }]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 64Mi }
+      volumes: [{ name: cfg, configMap: { name: nginx-stub } }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: demo-web
+spec:
+  selector: { app: frontend }
+  ports: [{ port: 80, targetPort: 80 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: demo-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: gateway }
+  template:
+    metadata:
+      labels:
+        app: gateway
+        app.kubernetes.io/name: gateway
+        app.graphon.io/owner-team: platform-team
+        app.graphon.io/owner-email: platform@demo.io
+        app.graphon.io/owner-slack: "#platform"
+        app.graphon.io/service-type: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: nginx:1.27-alpine
+          ports: [{ containerPort: 80 }]
+          volumeMounts: [{ name: cfg, mountPath: /etc/nginx/conf.d }]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 64Mi }
+      volumes: [{ name: cfg, configMap: { name: nginx-stub } }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: demo-web
+spec:
+  selector: { app: gateway }
+  ports: [{ port: 80, targetPort: 80 }]
+
+
+# ════════════════════════════════════════════════════════════════
+# NAMESPACE: demo-api  (orders-team, payments-team, catalog-team)
+# ════════════════════════════════════════════════════════════════
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-stub
+  namespace: demo-api
+data:
+  default.conf: |
+    server {
+      listen 80;
+      location /health { return 200 "ok\n"; }
+      location /       { return 200 "stub\n"; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+  namespace: demo-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: orders }
+  template:
+    metadata:
+      labels:
+        app: orders
+        app.kubernetes.io/name: orders
+        app.graphon.io/owner-team: orders-team
+        app.graphon.io/owner-email: orders@demo.io
+        app.graphon.io/owner-slack: "#orders"
+        app.graphon.io/service-type: api
+    spec:
+      containers:
+        - name: orders
+          image: nginx:1.27-alpine
+          ports: [{ containerPort: 80 }]
+          volumeMounts: [{ name: cfg, mountPath: /etc/nginx/conf.d }]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 64Mi }
+      volumes: [{ name: cfg, configMap: { name: nginx-stub } }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders
+  namespace: demo-api
+spec:
+  selector: { app: orders }
+  ports: [{ port: 80, targetPort: 80 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments
+  namespace: demo-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: payments }
+  template:
+    metadata:
+      labels:
+        app: payments
+        app.kubernetes.io/name: payments
+        app.graphon.io/owner-team: payments-team
+        app.graphon.io/owner-email: payments@demo.io
+        app.graphon.io/owner-slack: "#payments"
+        app.graphon.io/service-type: api
+    spec:
+      containers:
+        - name: payments
+          image: nginx:1.27-alpine
+          ports: [{ containerPort: 80 }]
+          volumeMounts: [{ name: cfg, mountPath: /etc/nginx/conf.d }]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 64Mi }
+      volumes: [{ name: cfg, configMap: { name: nginx-stub } }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payments
+  namespace: demo-api
+spec:
+  selector: { app: payments }
+  ports: [{ port: 80, targetPort: 80 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  namespace: demo-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: catalog }
+  template:
+    metadata:
+      labels:
+        app: catalog
+        app.kubernetes.io/name: catalog
+        app.graphon.io/owner-team: catalog-team
+        app.graphon.io/owner-email: catalog@demo.io
+        app.graphon.io/owner-slack: "#catalog"
+        app.graphon.io/service-type: api
+    spec:
+      containers:
+        - name: catalog
+          image: nginx:1.27-alpine
+          ports: [{ containerPort: 80 }]
+          volumeMounts: [{ name: cfg, mountPath: /etc/nginx/conf.d }]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 64Mi }
+      volumes: [{ name: cfg, configMap: { name: nginx-stub } }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog
+  namespace: demo-api
+spec:
+  selector: { app: catalog }
+  ports: [{ port: 80, targetPort: 80 }]
+
+
+# ════════════════════════════════════════════════════════════════
+# NAMESPACE: demo-data  (platform-team owns shared data services)
+# ════════════════════════════════════════════════════════════════
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-stub
+  namespace: demo-data
+data:
+  default.conf: |
+    server {
+      listen 80;
+      location /health { return 200 "ok\n"; }
+      location /       { return 200 "stub\n"; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notifications
+  namespace: demo-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: notifications }
+  template:
+    metadata:
+      labels:
+        app: notifications
+        app.kubernetes.io/name: notifications
+        app.graphon.io/owner-team: platform-team
+        app.graphon.io/owner-email: platform@demo.io
+        app.graphon.io/owner-slack: "#platform"
+        app.graphon.io/service-type: messaging
+    spec:
+      containers:
+        - name: notifications
+          image: nginx:1.27-alpine
+          ports: [{ containerPort: 80 }]
+          volumeMounts: [{ name: cfg, mountPath: /etc/nginx/conf.d }]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 64Mi }
+      volumes: [{ name: cfg, configMap: { name: nginx-stub } }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notifications
+  namespace: demo-data
+spec:
+  selector: { app: notifications }
+  ports: [{ port: 80, targetPort: 80 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: demo-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: user-service }
+  template:
+    metadata:
+      labels:
+        app: user-service
+        app.kubernetes.io/name: user-service
+        app.graphon.io/owner-team: platform-team
+        app.graphon.io/owner-email: platform@demo.io
+        app.graphon.io/owner-slack: "#platform"
+        app.graphon.io/service-type: api
+    spec:
+      containers:
+        - name: user-service
+          image: nginx:1.27-alpine
+          ports: [{ containerPort: 80 }]
+          volumeMounts: [{ name: cfg, mountPath: /etc/nginx/conf.d }]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 64Mi }
+      volumes: [{ name: cfg, configMap: { name: nginx-stub } }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: demo-data
+spec:
+  selector: { app: user-service }
+  ports: [{ port: 80, targetPort: 80 }]

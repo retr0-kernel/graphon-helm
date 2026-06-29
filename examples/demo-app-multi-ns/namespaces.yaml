@@ -1,0 +1,34 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Graphon Multi-Namespace Demo — 3 namespaces simulating a real company setup
+#
+#   demo-web   →  frontend-facing services   (frontend, gateway)
+#   demo-api   →  internal microservices     (orders, payments, catalog)
+#   demo-data  →  shared platform services   (notifications, user-service)
+#
+# This layout is intentional: real organisations have separate namespaces per
+# team or domain. Graphon's eBPF agent captures cross-namespace connections
+# automatically — no service mesh, no instrumentation required.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-web
+  labels:
+    graphon.io/env: demo
+    graphon.io/tier: web
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-api
+  labels:
+    graphon.io/env: demo
+    graphon.io/tier: api
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-data
+  labels:
+    graphon.io/env: demo
+    graphon.io/tier: data
