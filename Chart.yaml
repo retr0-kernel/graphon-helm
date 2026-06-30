@@ -5,8 +5,8 @@ description: |
   Automatically discovers how services communicate inside Kubernetes using eBPF,
   and answers: Who owns this? Can I delete it? Is this dependency expected?
 type: application
-version: 0.3.1
-appVersion: "v0.3.1"
+version: 0.3.2
+appVersion: "v0.3.2"
 home: https://github.com/retr0-kernel/graphon-helm
 sources:
   - https://github.com/retr0-kernel/graphon-helm
