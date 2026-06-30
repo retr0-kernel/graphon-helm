@@ -113,10 +113,11 @@ fi
 section "3. Ownership"
 
 OWN=$(api GET /api/v1/ownership)
-OWN_COUNT=$(echo "$OWN" | jq 'if type=="array" then length else 0 end' 2>/dev/null || echo "0")
+# /api/v1/ownership returns {"assignments":[...],"total":N}
+OWN_COUNT=$(echo "$OWN" | jq '(.assignments | length) // (.total) // 0' 2>/dev/null || echo "0")
 if [ "${OWN_COUNT:-0}" -ge 1 ] 2>/dev/null; then
   ok "Ownership records  (count=$OWN_COUNT)"
-  echo "$OWN" | jq -r '.[] | "    \(.node_id // "?")  →  \(.team // "unowned")"' 2>/dev/null | head -10
+  echo "$OWN" | jq -r '.assignments[] | "    \(.node_id // "?")  →  team:\(.owner_team // "unowned")"' 2>/dev/null | head -10
 else
   fail "No ownership records"
   dump "$OWN"
@@ -125,16 +126,21 @@ fi
 # ─── 4. Safe-Delete ───────────────────────────────────────────────────────────
 section "4. Safe-Delete Analysis"
 
-GW=$(api GET /api/v1/services/gateway/safe-delete)
+# Safe-delete uses the full Neo4j node ID (URN format).
+# Derive the node IDs from what the agent actually creates.
+GW_ID="svc:${TID}:${CID}:demo-api:gateway"
+PM_ID="svc:${TID}:${CID}:demo-api:payments"
+
+GW=$(api GET "/api/v1/services/$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe='')); " "$GW_ID" 2>/dev/null || echo "$GW_ID")/safe-delete")
 GW_SAFE=$(echo "$GW" | jq -r '.safe // "null"' 2>/dev/null || echo "null")
 if   [ "$GW_SAFE" = "false" ]; then ok "gateway blocked  (inbound=$(echo "$GW" | jq -r '.inbound_count // 0' 2>/dev/null))"
-elif [ "$GW_SAFE" = "null"  ]; then info "gateway not in graph yet"
+elif [ "$GW_SAFE" = "null"  ]; then info "gateway not in graph yet  (id=$GW_ID)"
 else fail "gateway: expected safe=false, got safe=$GW_SAFE"; dump "$GW"; fi
 
-PM=$(api GET /api/v1/services/payments/safe-delete)
+PM=$(api GET "/api/v1/services/$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe='')); " "$PM_ID" 2>/dev/null || echo "$PM_ID")/safe-delete")
 PM_SAFE=$(echo "$PM" | jq -r '.safe // "null"' 2>/dev/null || echo "null")
 if   [ "$PM_SAFE" = "true" ]; then ok "payments safe  (no inbound deps)"
-elif [ "$PM_SAFE" = "null" ]; then info "payments not in graph yet"
+elif [ "$PM_SAFE" = "null" ]; then info "payments not in graph yet  (id=$PM_ID)"
 else fail "payments: expected safe=true, got safe=$PM_SAFE"; dump "$PM"; fi
 
 # ─── 5. Snapshots ─────────────────────────────────────────────────────────────
