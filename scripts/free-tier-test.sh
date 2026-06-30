@@ -127,8 +127,8 @@ fi
 section "4. Safe-Delete Analysis"
 
 # Safe-delete uses the full Neo4j node ID (URN format).
-# Derive the node IDs from what the agent actually creates.
-GW_ID="svc:${TID}:${CID}:demo-api:gateway"
+# gateway lives in demo-web; payments lives in demo-api.
+GW_ID="svc:${TID}:${CID}:demo-web:gateway"
 PM_ID="svc:${TID}:${CID}:demo-api:payments"
 
 GW=$(api GET "/api/v1/services/$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe='')); " "$GW_ID" 2>/dev/null || echo "$GW_ID")/safe-delete")
