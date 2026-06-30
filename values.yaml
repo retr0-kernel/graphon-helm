@@ -31,7 +31,7 @@ backend:
   image:
     registry: ghcr.io
     repository: retr0-kernel/graphon-backend
-    tag: "v0.3.0"
+    tag: "v0.3.1"
     pullPolicy: IfNotPresent
 
   # AUTH_DISABLED=true  → self-hosted mode: X-Tenant-ID header accepted (no API key needed)
@@ -152,7 +152,7 @@ ui:
   image:
     registry: ghcr.io
     repository: retr0-kernel/graphon-ui
-    tag: "v0.3.0"
+    tag: "v0.3.1"
     pullPolicy: IfNotPresent
 
   service:
@@ -202,7 +202,7 @@ agent:
   image:
     registry: ghcr.io
     repository: retr0-kernel/graphon-agent
-    tag: "v0.3.0"
+    tag: "v0.3.1"
     pullPolicy: IfNotPresent
 
   # How often to flush captured events to the backend
